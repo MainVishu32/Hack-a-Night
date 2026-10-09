@@ -1,0 +1,79 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pulsereserve_app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://pulse_user:pulse_secure_pass_2026@postgres:5432/pulsereserve_db
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=pulse_production_cryptographic_secret_key_2026
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pulsereserve_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=pulse_user
+      - POSTGRES_PASSWORD=pulse_secure_pass_2026
+      - POSTGRES_DB=pulsereserve_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/db/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse_user -d pulsereserve_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: pulsereserve_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: pulsereserve_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: pulsereserve_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
