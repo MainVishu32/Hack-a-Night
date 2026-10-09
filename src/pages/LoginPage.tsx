@@ -20,8 +20,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
 
     try {
       setLoading(true);
-      await login(email, password);
-      onNavigate('seats');
+      const signedInUser = await login(email, password);
+      onNavigate(signedInUser.role === 'admin' ? 'admin' : 'events');
     } catch (err: any) {
       setError(err.message || 'Authentication failed');
     } finally {
@@ -42,7 +42,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#F8FAFC]">Sign In</h1>
           <p className="mt-1 text-xs text-[#A8B3C7]">
-            Authenticate with secure server-side session credentials.
+            Sign in to save your tickets and keep your plans together.
           </p>
         </div>
 
@@ -93,16 +93,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
             disabled={loading}
             className="w-full mt-2 py-3 px-4 rounded-lg text-xs font-semibold text-[#0B1220] bg-[#2DD4BF] hover:bg-[#2DD4BF]/90 disabled:opacity-50 transition-colors shadow-sm"
           >
-            {loading ? 'Authenticating...' : 'Sign In to Workspace'}
+            {loading ? 'Signing you in…' : 'Sign in'}
           </button>
         </form>
 
-        {/* Quick Demo Pre-fill Box */}
         <div className="p-4 bg-[#0B1220] border border-[#293548] rounded-xl space-y-2.5">
           <div className="text-[11px] font-mono text-[#A8B3C7] uppercase tracking-wider flex items-center gap-1.5">
             <KeyRound className="w-3 h-3 text-[#2DD4BF]" />
-            Quick Demo Accounts
+            Demo sign-ins
           </div>
+          <p className="text-[11px] text-[#A8B3C7]">Use a sample account to explore this demo.</p>
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -110,7 +110,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               className="p-2 text-left rounded-lg bg-[#111C2E] border border-[#293548] hover:border-[#2DD4BF] transition-colors"
             >
               <div className="text-xs font-medium text-[#F8FAFC]">Alex Mercer</div>
-              <div className="text-[11px] text-[#A8B3C7]">Attendee (User)</div>
+              <div className="text-[11px] text-[#A8B3C7]">Sample attendee</div>
             </button>
             <button
               type="button"
@@ -118,10 +118,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigate }) => {
               className="p-2 text-left rounded-lg bg-[#111C2E] border border-[#293548] hover:border-[#60A5FA] transition-colors"
             >
               <div className="text-xs font-medium text-[#F8FAFC] flex items-center gap-1">
-                <span>Admin Lead</span>
+                <span>Operations demo</span>
                 <Shield className="w-3 h-3 text-[#60A5FA]" />
               </div>
-              <div className="text-[11px] text-[#A8B3C7]">Observability</div>
+              <div className="text-[11px] text-[#A8B3C7]">Admin account</div>
             </button>
           </div>
         </div>

@@ -21,14 +21,17 @@ import { CountdownTimer } from '../components/CountdownTimer.tsx';
 
 interface SeatSelectionPageProps {
   onNavigate: (page: string, params?: any) => void;
+  eventId?: string;
 }
 
-export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate }) => {
+export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate, eventId: selectedEventId }) => {
+  const eventId = selectedEventId || 'evt_summit_2026';
   const { user } = useAuth();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [units, setUnits] = useState<InventoryUnit[]>([]);
   const [summary, setSummary] = useState({ total: 200, available: 196, held: 0, confirmed: 4 });
   const [loading, setLoading] = useState(true);
+  const [inventoryError, setInventoryError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
 
@@ -46,7 +49,8 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
   const fetchInventory = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
-      const data = await api.getEventInventory('evt_summit_2026');
+      const data = await api.getEventInventory(eventId);
+      setInventoryError('');
       setEvent(data.event);
       setUnits(data.units);
       setSummary(data.summary);
@@ -61,7 +65,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
         setHoldExpiresAt(myHeldUnit.expiresAt);
       }
     } catch (err: any) {
-      console.error('Failed to load inventory:', err);
+      setInventoryError(err instanceof Error ? err.message : 'Could not load ticket availability.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -72,7 +76,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
     fetchInventory();
     const interval = setInterval(() => fetchInventory(false), 2500);
     return () => clearInterval(interval);
-  }, []);
+  }, [eventId]);
 
   // Filtered units
   const filteredUnits = units.filter(u => {
@@ -80,6 +84,17 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
     const matchesSearch = searchQuery === '' || u.unitCode.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesTier && matchesSearch;
   });
+  const tierOptions = [
+    { value: 'ALL', label: `All tickets (${summary.total})` },
+    ...(['VIP', 'PREMIUM', 'STANDARD'] as const)
+      .map(tier => {
+        const tierUnits = units.filter(unit => unit.tier === tier);
+        const price = tierUnits.length ? Math.min(...tierUnits.map(unit => unit.price)) : null;
+        const name = tier === 'PREMIUM' ? 'Premium' : tier === 'STANDARD' ? 'Standard' : 'VIP';
+        return { value: tier, label: `${name} (${tierUnits.length})${price === null ? '' : ` · from $${price.toFixed(0)}`}` };
+      })
+      .filter(option => units.some(unit => unit.tier === option.value)),
+  ];
 
   // Group by Row
   const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
@@ -102,7 +117,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
       setFeedback(null);
 
       const idempotencyKey = `hold_${user.id}_${selectedUnit.id}_${Date.now()}`;
-      const result = await api.createHold('evt_summit_2026', selectedUnit.id, idempotencyKey);
+      const result = await api.createHold(eventId, selectedUnit.id, idempotencyKey);
 
       setActiveReservationId(result.reservationId);
       setHoldExpiresAt(result.expiresAt);
@@ -162,7 +177,22 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
       <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center bg-[#0B1220]">
         <div className="flex items-center gap-3 text-sm text-[#A8B3C7]">
           <RefreshCw className="w-5 h-5 animate-spin text-[#2DD4BF]" />
-          <span>Synchronizing 200-seat live inventory...</span>
+          <span>Getting tickets ready…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (inventoryError && units.length === 0) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4 py-12 bg-[#0B1220]">
+        <div className="max-w-md rounded-2xl border border-[#293548] bg-[#111C2E] p-8 text-center">
+          <AlertCircle className="mx-auto h-9 w-9 text-[#F26B4F]" />
+          <h1 className="mt-4 text-xl font-bold text-[#F8FAFC]">Tickets aren’t available right now</h1>
+          <p className="mt-2 text-sm text-[#A8B3C7]">{inventoryError}</p>
+          <button onClick={() => { void fetchInventory(true); }} className="mt-5 rounded-xl bg-[#2DD4BF] px-5 py-2.5 text-sm font-semibold text-[#0B1220]">
+            Try again
+          </button>
         </div>
       </div>
     );
@@ -177,10 +207,10 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
           
           <div className="lg:col-span-8 p-6 sm:p-8 space-y-4 flex flex-col justify-between">
             <div className="space-y-2">
-              <div className="flex items-center gap-3 text-xs text-[#2DD4BF] font-mono">
-                <span className="font-semibold">EVENT CODE: EVT-SUMMIT-2026</span>
+              <div className="flex items-center gap-3 text-xs text-[#2DD4BF]">
+                <span className="font-semibold">TICKETS & SEATS</span>
                 <span aria-hidden="true" className="text-[#293548]">·</span>
-                <span>200 SEATS TOTAL</span>
+                <span>{summary.total} {summary.total === 1 ? 'spot' : 'spots'}</span>
               </div>
 
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#F8FAFC]">
@@ -188,7 +218,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
               </h1>
 
               <p className="text-xs sm:text-sm text-[#A8B3C7] max-w-2xl leading-relaxed">
-                {event?.description || 'Annual high-throughput cloud computing, distributed systems, and real-time infrastructure conference.'}
+                {event?.description || 'A gathering for people curious about the technology shaping tomorrow.'}
               </p>
             </div>
 
@@ -206,12 +236,12 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
               <span aria-hidden="true" className="text-[#293548]">·</span>
               <div>
                 <span className="text-sm font-bold font-mono text-[#60A5FA] tabular-nums">{summary.confirmed}</span>
-                <div className="text-[11px]">Confirmed</div>
+                <div className="text-[11px]">Booked</div>
               </div>
               <span aria-hidden="true" className="text-[#293548]">·</span>
               <div className="flex items-center gap-1.5 font-mono text-[11px]">
                 <Clock className="w-3.5 h-3.5 text-[#2DD4BF]" />
-                <span>Hold TTL: 5 min (300s)</span>
+                <span>We’ll hold your seat for {Math.ceil((event?.hold_duration_seconds ?? 300) / 60)} minutes</span>
               </div>
             </div>
           </div>
@@ -227,51 +257,31 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
 
         </div>
 
+        {inventoryError && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-[#F59E0B]/30 bg-[#F59E0B]/10 px-4 py-3 text-xs text-[#A15D16]" role="status">
+            <span>Availability may be out of date. {inventoryError}</span>
+            <button onClick={() => { void fetchInventory(true); }} className="shrink-0 font-semibold underline">Refresh tickets</button>
+          </div>
+        )}
+
         {/* Filter & Search Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-[#111C2E] border border-[#293548] rounded-xl">
           
           {/* Segmented Tier Controls (Interactive Functional Buttons) */}
           <div className="flex items-center gap-1 p-1 bg-[#0B1220] rounded-lg border border-[#293548]">
-            <button
-              onClick={() => setSelectedTier('ALL')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                selectedTier === 'ALL'
-                  ? 'bg-[#111C2E] text-[#2DD4BF] shadow-sm'
-                  : 'text-[#A8B3C7] hover:text-[#F8FAFC]'
-              }`}
-            >
-              All Tiers (200)
-            </button>
-            <button
-              onClick={() => setSelectedTier('VIP')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                selectedTier === 'VIP'
-                  ? 'bg-[#111C2E] text-[#2DD4BF] shadow-sm'
-                  : 'text-[#A8B3C7] hover:text-[#F8FAFC]'
-              }`}
-            >
-              VIP ($280)
-            </button>
-            <button
-              onClick={() => setSelectedTier('PREMIUM')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                selectedTier === 'PREMIUM'
-                  ? 'bg-[#111C2E] text-[#2DD4BF] shadow-sm'
-                  : 'text-[#A8B3C7] hover:text-[#F8FAFC]'
-              }`}
-            >
-              Premium ($195)
-            </button>
-            <button
-              onClick={() => setSelectedTier('STANDARD')}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                selectedTier === 'STANDARD'
-                  ? 'bg-[#111C2E] text-[#2DD4BF] shadow-sm'
-                  : 'text-[#A8B3C7] hover:text-[#F8FAFC]'
-              }`}
-            >
-              Standard ($140)
-            </button>
+            {tierOptions.map(option => (
+              <button
+                key={option.value}
+                onClick={() => setSelectedTier(option.value)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  selectedTier === option.value
+                    ? 'bg-[#111C2E] text-[#2DD4BF] shadow-sm'
+                    : 'text-[#A8B3C7] hover:text-[#F8FAFC]'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
 
           {/* Search Box & Refresh Trigger */}
@@ -290,7 +300,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
             <button
               onClick={() => fetchInventory(true)}
               className="p-2 bg-[#0B1220] hover:bg-[#17243B] border border-[#293548] rounded-lg text-[#A8B3C7] hover:text-[#F8FAFC] transition-colors"
-              title="Refresh inventory now"
+              title="Refresh ticket availability"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-[#2DD4BF]' : ''}`} />
             </button>
@@ -315,7 +325,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
             </span>
             <span className="flex items-center gap-2">
               <span className="w-3.5 h-3.5 rounded bg-[#60A5FA]/20 border border-[#60A5FA]" />
-              <span>Confirmed</span>
+              <span>Sold out</span>
             </span>
           </div>
 
@@ -327,12 +337,12 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
         {/* Grid and Detail Panel Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
-          {/* 200-Seat Interactive Grid */}
+          {/* Interactive seat map */}
           <div className="lg:col-span-8 bg-[#111C2E] border border-[#293548] rounded-2xl p-6 space-y-6 shadow-xl">
             
             {/* Stage Indicator Bar */}
             <div className="w-full py-2 bg-[#0B1220] border border-[#293548] rounded-lg text-center text-xs font-mono text-[#2DD4BF] tracking-wider uppercase">
-              Keynote Presentation Stage
+              Stage
             </div>
 
             {/* Seat Matrix */}
@@ -389,11 +399,11 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
 
           </div>
 
-          {/* Seat Inspector & Reservation Panel */}
+          {/* Selected ticket details */}
           <div className="lg:col-span-4 bg-[#111C2E] border border-[#293548] rounded-2xl p-6 space-y-6 shadow-xl sticky top-24">
             
             <div className="flex items-center justify-between pb-4 border-b border-[#293548]">
-              <h2 className="text-base font-bold text-[#F8FAFC]">Seat Inspector</h2>
+              <h2 className="text-base font-bold text-[#F8FAFC]">Your selection</h2>
               {selectedUnit && (
                 <span className="font-mono text-xs px-2.5 py-1 bg-[#0B1220] border border-[#293548] rounded text-[#2DD4BF]">
                   {selectedUnit.unitCode}
@@ -423,7 +433,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
                 
                 <div className="space-y-3 bg-[#0B1220] border border-[#293548] rounded-xl p-4">
                   <div className="flex justify-between text-xs text-[#A8B3C7]">
-                    <span>Category Tier</span>
+                    <span>Ticket type</span>
                     <span className="text-[#F8FAFC] font-semibold">{selectedUnit.tier}</span>
                   </div>
                   <div className="flex justify-between text-xs text-[#A8B3C7]">
@@ -431,11 +441,11 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
                     <span className="text-[#F8FAFC]">Row {selectedUnit.rowLabel}, Seat {selectedUnit.seatNumber}</span>
                   </div>
                   <div className="flex justify-between text-xs text-[#A8B3C7]">
-                    <span>Admission Price</span>
+                    <span>Ticket price</span>
                     <span className="text-[#2DD4BF] font-mono font-bold text-sm">${selectedUnit.price.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-xs text-[#A8B3C7] pt-2 border-t border-[#293548]">
-                    <span>Status</span>
+                    <span>Availability</span>
                     <span
                       className={`font-semibold font-mono ${
                         selectedUnit.status === 'AVAILABLE'
@@ -445,7 +455,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
                           : 'text-[#F59E0B]'
                       }`}
                     >
-                      {selectedUnit.isMine ? 'HELD BY YOU' : selectedUnit.status}
+                      {selectedUnit.isMine ? 'Held for you' : selectedUnit.status === 'AVAILABLE' ? 'Available' : selectedUnit.status === 'CONFIRMED' ? 'Sold out' : 'Temporarily unavailable'}
                     </span>
                   </div>
                 </div>
@@ -454,7 +464,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
                 {selectedUnit.isMine && holdExpiresAt && (
                   <div className="p-3 bg-[#111C2E] border border-[#2DD4BF]/40 rounded-xl space-y-2">
                     <div className="text-[11px] text-[#A8B3C7] flex items-center justify-between">
-                      <span>Server Hold Expiry</span>
+                      <span>Your ticket is held for</span>
                       <CountdownTimer
                         expiresAt={holdExpiresAt}
                         serverTimeOffset={serverTimeOffset}
@@ -478,7 +488,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
                       disabled={actionLoading}
                       className="w-full py-3 px-4 rounded-lg text-xs font-semibold text-[#0B1220] bg-[#2DD4BF] hover:bg-[#2DD4BF]/90 disabled:opacity-50 transition-colors shadow-sm flex items-center justify-center gap-2"
                     >
-                      {actionLoading ? 'Claiming Hold...' : 'Claim Temporary 5-Min Hold'}
+                      {actionLoading ? 'Saving your seat…' : 'Reserve this seat'}
                     </button>
                   )}
 
@@ -488,7 +498,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
                         onClick={handleProceedToCheckout}
                         className="w-full py-3 px-4 rounded-lg text-xs font-semibold text-[#0B1220] bg-[#2DD4BF] hover:bg-[#2DD4BF]/90 transition-colors shadow-sm flex items-center justify-center gap-2"
                       >
-                        <span>Proceed to Checkout</span>
+                        <span>Continue to checkout</span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
 
@@ -519,7 +529,7 @@ export const SeatSelectionPage: React.FC<SeatSelectionPageProps> = ({ onNavigate
             ) : (
               <div className="text-center py-8 text-xs text-[#A8B3C7] space-y-2">
                 <Layers className="w-8 h-8 text-[#293548] mx-auto" />
-                <p>Select any seat in the 200-unit grid to inspect tier details and claim a temporary hold.</p>
+                <p>Choose an available seat to see the ticket price and reserve it for a few minutes.</p>
               </div>
             )}
 

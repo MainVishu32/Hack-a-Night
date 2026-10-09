@@ -131,7 +131,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ reservationId, onNav
           <div className="space-y-1">
             <h1 className="text-2xl font-bold tracking-tight text-[#F8FAFC]">Booking Confirmed!</h1>
             <p className="text-xs text-[#A8B3C7]">
-              Atomic hold converted to permanent PostgreSQL ACID record.
+              Your place is saved. We can’t wait to see you there.
             </p>
           </div>
 
@@ -204,7 +204,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ reservationId, onNav
           className="text-xs text-[#A8B3C7] hover:text-[#2DD4BF] flex items-center gap-1.5 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Back to Interactive Seat Grid</span>
+          <span>Back to seat selection</span>
         </button>
 
         {/* Expiry Banner or Warning */}
@@ -252,29 +252,29 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ reservationId, onNav
 
             <div className="space-y-3.5 text-xs text-[#A8B3C7]">
               <div>
-                <div className="text-[11px] font-mono text-[#2DD4BF]">EVENT</div>
+                <div className="text-[11px] font-semibold text-[#2DD4BF]">YOUR EVENT</div>
                 <div className="text-[#F8FAFC] font-semibold text-sm mt-0.5">{data?.event?.title}</div>
                 <div className="text-[11px] text-[#A8B3C7]/80">{data?.event?.venue}</div>
               </div>
 
               <div className="pt-3 border-t border-[#293548] flex justify-between">
-                <span>Seat Code</span>
+                <span>Your seat</span>
                 <span className="font-mono font-bold text-[#F8FAFC]">{data?.unit?.unit_code}</span>
               </div>
 
               <div className="flex justify-between">
-                <span>Tier Level</span>
+                <span>Ticket type</span>
                 <span className="text-[#F8FAFC] font-medium">{data?.unit?.tier}</span>
               </div>
 
               <div className="flex justify-between">
-                <span>Hold Created At</span>
+                <span>Reserved at</span>
                 <span className="font-mono text-[11px]">{new Date(data?.reservation?.created_at || '').toLocaleTimeString()}</span>
               </div>
 
               <div className="flex justify-between">
-                <span>Fencing Generation</span>
-                <span className="font-mono text-[11px] text-[#60A5FA]">Gen #{data?.reservation?.generation}</span>
+                <span>Ticket status</span>
+                <span className="font-medium text-[#60A5FA]">Held for you</span>
               </div>
 
               <div className="pt-3 border-t border-[#293548] flex justify-between text-sm">
@@ -303,9 +303,9 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ reservationId, onNav
             
             <div className="flex items-center justify-between pb-4 border-b border-[#293548]">
               <div>
-                <h2 className="text-lg font-bold text-[#F8FAFC]">Simulated Checkout</h2>
+                <h2 className="text-lg font-bold text-[#F8FAFC]">Finish your booking</h2>
                 <p className="text-xs text-[#A8B3C7]">
-                  Testing environment: simulated card authorization.
+                  Demo checkout · no real payment will be taken.
                 </p>
               </div>
               <div className="w-8 h-8 rounded-lg bg-[#0B1220] border border-[#293548] flex items-center justify-center text-[#2DD4BF]">
@@ -363,14 +363,8 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ reservationId, onNav
                 </div>
               </div>
 
-              <div className="p-3 bg-[#0B1220] border border-[#293548] rounded-lg text-[11px] text-[#A8B3C7] space-y-1 font-mono">
-                <div className="flex justify-between">
-                  <span>IDEMPOTENCY KEY:</span>
-                  <span className="text-[#2DD4BF] truncate max-w-[200px]">{idempotencyKey}</span>
-                </div>
-                <div className="text-[#A8B3C7]/80">
-                  Prevents duplicate submissions under packet retry.
-                </div>
+              <div className="rounded-lg border border-[#293548] bg-[#0B1220] p-3 text-xs text-[#A8B3C7]">
+                Your seat is held just for you while you complete this demo checkout.
               </div>
 
               <button
@@ -379,7 +373,7 @@ export const CheckoutPage: React.FC<CheckoutPageProps> = ({ reservationId, onNav
                 className="w-full py-3.5 px-4 rounded-lg text-xs font-semibold text-[#0B1220] bg-[#2DD4BF] hover:bg-[#2DD4BF]/90 disabled:opacity-50 transition-colors shadow-sm flex items-center justify-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>{submitting ? 'Confirming with Redis Lua & Postgres...' : `Authorize & Confirm Booking ($${data?.unit?.price.toFixed(2)})`}</span>
+                <span>{submitting ? 'Confirming your tickets…' : `Confirm booking · $${data?.unit?.price.toFixed(2)}`}</span>
               </button>
 
             </form>

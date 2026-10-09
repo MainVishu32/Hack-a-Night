@@ -1,275 +1,152 @@
-import React from 'react';
-import { ArrowRight, Layers, Zap, Shield, RotateCcw, Activity, Cpu } from 'lucide-react';
-
+import React, { useEffect, useState } from 'react';
+import { ArrowRight, CalendarDays, MapPin, Search, Sparkles, Ticket, Music2, Laugh, Trophy, Theater, PartyPopper } from 'lucide-react';
+import { api } from '../services/api.ts';
+import type { EventItem } from '../types/index.ts';
 
 interface LandingPageProps {
-  onNavigate: (page: string) => void;
+  onNavigate: (page: string, params?: any) => void;
 }
 
+const categories = [
+  { name: 'Music', icon: Music2 },
+  { name: 'Comedy', icon: Laugh },
+  { name: 'Festivals', icon: PartyPopper },
+  { name: 'Sports', icon: Trophy },
+  { name: 'Theatre', icon: Theater },
+];
+
+const eventImage = (event: EventItem) => {
+  const text = `${event.title} ${event.description}`.toLowerCase();
+  if (/music|concert|band|dj/.test(text)) return 'photo-1501386761578-eac5c94b800a';
+  if (/sport|football|basketball|tennis/.test(text)) return 'photo-1461896836934-ffe607ba8211';
+  if (/theatre|theater|stage|comedy/.test(text)) return 'photo-1507676184212-d03ab07a01bf';
+  return 'photo-1540575467063-178a50c2df87';
+};
+
+const eventCategory = (event: EventItem) => {
+  const text = `${event.title} ${event.description}`.toLowerCase();
+  if (/music|concert|band|dj/.test(text)) return 'Music';
+  if (/comedy|comic|stand.?up/.test(text)) return 'Comedy';
+  if (/festival|fair/.test(text)) return 'Festivals';
+  if (/sport|football|basketball|tennis/.test(text)) return 'Sports';
+  if (/theatre|theater|play|musical/.test(text)) return 'Theatre';
+  return 'Live experiences';
+};
+
+const formatDate = (date: string) => new Date(date).toLocaleDateString([], {
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+});
+
 export const LandingPage: React.FC<LandingPageProps> = ({ onNavigate }) => {
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    api.getEvents()
+      .then(result => {
+        if (active) setEvents(result.events.filter(event => event.status === 'ACTIVE'));
+      })
+      .catch(err => {
+        if (active) setError(err instanceof Error ? err.message : 'Could not load events.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const browse = (category?: string) => {
+    onNavigate('events', { query, category: category || 'All' });
+  };
+
   return (
-    <div className="min-h-screen bg-[#0B1220] text-[#F8FAFC]">
-      
-      {/* Demo Environment Bar */}
-      <div className="bg-[#111C2E] border-b border-[#293548] py-2 px-4 text-xs text-[#A8B3C7] text-center">
-        <div className="max-w-7xl mx-auto flex items-center justify-center gap-3">
-          <span className="inline-flex items-center gap-1.5 text-[#2DD4BF] font-medium">
-            <span className="w-2 h-2 rounded-full bg-[#2DD4BF]" />
-            Local Sandbox Engine Active
-          </span>
-          <span aria-hidden="true" className="text-[#293548]">·</span>
-          <span>PostgreSQL Strict Invariants + Redis Lua Coordination Connected</span>
-          <span aria-hidden="true" className="text-[#293548]">·</span>
-          <button
-            onClick={() => onNavigate('seats')}
-            className="text-[#2DD4BF] hover:underline font-medium"
-          >
-            Launch Interactive 200-Seat Demo →
-          </button>
-        </div>
-      </div>
-
-      {/* Hero Section */}
-      <section className="relative pt-12 pb-20 overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-            
-            {/* Left Content Column */}
-            <div className="lg:col-span-7 space-y-6">
-              
-              <div className="text-xs uppercase tracking-wider text-[#2DD4BF] font-semibold font-mono">
-                Distributed High-Contention Reservation Architecture
-              </div>
-
-              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-[#F8FAFC] leading-[1.1] text-balance">
-                Reserve at Scale. <br />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#2DD4BF] to-[#60A5FA]">
-                  Recover Automatically.
-                </span>
-              </h1>
-
-              <p className="text-lg text-[#A8B3C7] max-w-2xl leading-relaxed">
-                When thousands of users compete for limited seats in the same sub-second window, traditional databases deadlock and double-book. PulseReserve coordinates atomic temporary holds via Redis Lua scripts, fences stale releases, and reconciles state in the background.
-              </p>
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center gap-4 pt-2">
-                <button
-                  onClick={() => onNavigate('seats')}
-                  className="px-6 py-3.5 rounded-lg text-sm font-semibold text-[#0B1220] bg-[#2DD4BF] hover:bg-[#2DD4BF]/90 transition-colors shadow-sm flex items-center gap-2"
-                >
-                  <span>Explore Live Seat Grid</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-
-                <button
-                  onClick={() => onNavigate('dashboard')}
-                  className="px-6 py-3.5 rounded-lg text-sm font-medium text-[#F8FAFC] bg-[#111C2E] hover:bg-[#17243B] border border-[#293548] transition-colors"
-                >
-                  View Engine Metrics
-                </button>
-              </div>
-
-              {/* Unboxed Metadata Metrics */}
-              <div className="pt-6 border-t border-[#293548]/70 flex flex-wrap items-center gap-6 text-xs text-[#A8B3C7]">
-                <div>
-                  <span className="font-mono text-sm font-semibold text-[#F8FAFC]">200 Units</span>
-                  <div className="text-[#A8B3C7]/80">Demo Keynote Arena</div>
-                </div>
-                <span aria-hidden="true" className="text-[#293548]">/</span>
-                <div>
-                  <span className="font-mono text-sm font-semibold text-[#2DD4BF]">0 Double Bookings</span>
-                  <div className="text-[#A8B3C7]/80">Guaranteed Invariant</div>
-                </div>
-                <span aria-hidden="true" className="text-[#293548]">/</span>
-                <div>
-                  <span className="font-mono text-sm font-semibold text-[#60A5FA]">5m Temporary Hold</span>
-                  <div className="text-[#A8B3C7]/80">Server-Authoritative Expiry</div>
-                </div>
-              </div>
-
+    <div className="flash-page">
+      <section className="flash-hero">
+        <div className="flash-shell flash-hero-grid">
+          <div className="flash-hero-copy">
+            <span className="flash-eyebrow"><Sparkles size={15} /> GOOD TIMES, RIGHT THIS WAY</span>
+            <h1>Your next great experience <span>starts here.</span></h1>
+            <p>Find the little plans and big nights you’ll be talking about long after.</p>
+            <form className="flash-search" onSubmit={event => { event.preventDefault(); browse(); }}>
+              <Search size={19} aria-hidden="true" />
+              <input
+                aria-label="Search events, venues, or locations"
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                placeholder="Events, venues, or locations"
+              />
+              <button type="submit">Find events</button>
+            </form>
+            <div className="flash-hero-note"><span className="flash-live-dot" /> Real events. Live availability. Easy booking.</div>
+          </div>
+          <div className="flash-hero-photo" role="img" aria-label="Friends enjoying a live event">
+            <div className="flash-photo-note">
+              <span className="flash-note-icon"><Ticket size={19} /></span>
+              <span><strong>Make a night of it</strong><small>Your next favorite memory is out there</small></span>
             </div>
+          </div>
+        </div>
+      </section>
 
-            {/* Right Media Hero Card */}
-            <div className="lg:col-span-5 relative">
-              <div className="relative rounded-2xl overflow-hidden border border-[#293548] shadow-2xl bg-[#111C2E]">
-                <img
-                 src="https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1600&q=80"
-                  alt="High throughput server architecture"
-                  className="w-full h-80 object-cover"
-                />
-                <div className="p-5 border-t border-[#293548] space-y-3 bg-[#111C2E]">
-                  <div className="flex items-center justify-between text-xs text-[#A8B3C7]">
-                    <span className="font-mono font-medium text-[#F8FAFC]">Cluster Telemetry</span>
-                    <span className="text-[#2DD4BF] font-mono">Sub-10ms Batching</span>
-                  </div>
-                  <div className="text-xs text-[#A8B3C7] leading-relaxed">
-                    Redis single-threaded script execution isolates concurrent seat claims into atomic transactions, preventing race conditions before persisting to PostgreSQL.
+      <section className="flash-shell flash-category-section" aria-labelledby="category-heading">
+        <div className="flash-section-heading">
+          <div><span className="flash-kicker">A LITTLE BIT OF EVERYTHING</span><h2 id="category-heading">What are you in the mood for?</h2></div>
+        </div>
+        <div className="flash-categories">
+          {categories.map(({ name, icon: Icon }) => (
+            <button key={name} className="flash-category" onClick={() => browse(name)}>
+              <span><Icon size={20} /></span>{name}<ArrowRight size={15} className="flash-category-arrow" />
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="flash-shell flash-events-section" aria-labelledby="events-heading">
+        <div className="flash-section-heading">
+          <div><span className="flash-kicker">GOOD THINGS COMING UP</span><h2 id="events-heading">Upcoming experiences</h2><p>Real listings from the event calendar, with availability checked when you book.</p></div>
+          <button className="flash-text-link" onClick={() => browse()}>See all events <ArrowRight size={17} /></button>
+        </div>
+
+        {loading && <div className="flash-state"><span className="flash-spinner" />Finding your next night out…</div>}
+        {!loading && error && <div className="flash-state flash-state-error" role="alert">We couldn’t load events just now. {error}<button onClick={() => window.location.reload()}>Try again</button></div>}
+        {!loading && !error && events.length === 0 && (
+          <div className="flash-state flash-empty"><Ticket size={26} /><strong>New events are on the way</strong><span>Check back soon for something worth going out for.</span></div>
+        )}
+        {!loading && !error && events.length > 0 && (
+          <div className="flash-event-grid">
+            {events.slice(0, 3).map(event => (
+              <article className="flash-event-card" key={event.id}>
+                <div className="flash-event-image">
+                  <img src={`https://images.unsplash.com/${eventImage(event)}?auto=format&fit=crop&w=900&q=85`} alt="" />
+                  <span className="flash-image-tag">{eventCategory(event)}</span>
+                </div>
+                <div className="flash-event-content">
+                  <h3>{event.title}</h3>
+                  <div className="flash-event-meta"><CalendarDays size={15} /><span>{formatDate(event.starts_at)}</span></div>
+                  <div className="flash-event-meta"><MapPin size={15} /><span>{event.venue}</span></div>
+                  <div className="flash-card-bottom">
+                    <div><small>Tickets from</small><strong>${event.base_price.toFixed(2)}</strong></div>
+                    <button onClick={() => onNavigate('seats', { eventId: event.id })}>Book tickets <ArrowRight size={15} /></button>
                   </div>
                 </div>
-              </div>
-            </div>
-
+              </article>
+            ))}
           </div>
-        </div>
+        )}
+        <p className="flash-demo-note"><span>Demo inventory</span> Event listings and seat availability are loaded from this app’s live demo backend. Payment confirmation is simulated.</p>
       </section>
 
-      {/* Key Architectural Capabilities Section */}
-      <section className="py-20 bg-[#0B1220] border-t border-[#293548]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="max-w-3xl mb-14">
-            <h2 className="text-xs font-mono uppercase tracking-wider text-[#2DD4BF] font-semibold mb-2">
-              Core System Architecture
-            </h2>
-            <h3 className="text-3xl font-bold tracking-tight text-[#F8FAFC]">
-              Engineered for High-Contention Reliability
-            </h3>
-            <p className="mt-3 text-sm text-[#A8B3C7] leading-relaxed">
-              Every stage of the reservation lifecycle enforces strict mathematical invariants to protect inventory integrity under intense flash-sale traffic.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            
-            {/* Capability 1 */}
-            <div className="bg-[#111C2E] border border-[#293548] rounded-xl p-6 space-y-3">
-              <div className="w-10 h-10 rounded-lg bg-[#2DD4BF]/10 flex items-center justify-center text-[#2DD4BF]">
-                <Zap className="w-5 h-5" />
-              </div>
-              <h4 className="text-base font-semibold text-[#F8FAFC]">Atomic Lua Coordination</h4>
-              <p className="text-xs text-[#A8B3C7] leading-relaxed">
-                Redis Lua scripts atomically inspect unit status, verify hold expiry, assign fencing generation tokens, and apply TTL in a single non-preemptible operation.
-              </p>
-            </div>
-
-            {/* Capability 2 */}
-            <div className="bg-[#111C2E] border border-[#293548] rounded-xl p-6 space-y-3">
-              <div className="w-10 h-10 rounded-lg bg-[#60A5FA]/10 flex items-center justify-center text-[#60A5FA]">
-                <Shield className="w-5 h-5" />
-              </div>
-              <h4 className="text-base font-semibold text-[#F8FAFC]">Stale-Request Fencing</h4>
-              <p className="text-xs text-[#A8B3C7] leading-relaxed">
-                Monotonically increasing generation tokens prevent stale clients or delayed network packets from releasing or overwriting a newer reservation hold.
-              </p>
-            </div>
-
-            {/* Capability 3 */}
-            <div className="bg-[#111C2E] border border-[#293548] rounded-xl p-6 space-y-3">
-              <div className="w-10 h-10 rounded-lg bg-[#2DD4BF]/10 flex items-center justify-center text-[#2DD4BF]">
-                <RotateCcw className="w-5 h-5" />
-              </div>
-              <h4 className="text-base font-semibold text-[#F8FAFC]">Self-Healing Reconciler</h4>
-              <p className="text-xs text-[#A8B3C7] leading-relaxed">
-                A background worker periodically scans for unreleased expired holds, heals transient Redis-PostgreSQL cache drift, and recovers failed outbox persist events.
-              </p>
-            </div>
-
-            {/* Capability 4 */}
-            <div className="bg-[#111C2E] border border-[#293548] rounded-xl p-6 space-y-3">
-              <div className="w-10 h-10 rounded-lg bg-[#60A5FA]/10 flex items-center justify-center text-[#60A5FA]">
-                <Layers className="w-5 h-5" />
-              </div>
-              <h4 className="text-base font-semibold text-[#F8FAFC]">Transactional Outbox</h4>
-              <p className="text-xs text-[#A8B3C7] leading-relaxed">
-                Persistence and notification events are saved inside the transactional database boundaries, ensuring zero dropped confirmations even during worker interruptions.
-              </p>
-            </div>
-
-            {/* Capability 5 */}
-            <div className="bg-[#111C2E] border border-[#293548] rounded-xl p-6 space-y-3">
-              <div className="w-10 h-10 rounded-lg bg-[#2DD4BF]/10 flex items-center justify-center text-[#2DD4BF]">
-                <Cpu className="w-5 h-5" />
-              </div>
-              <h4 className="text-base font-semibold text-[#F8FAFC]">Adaptive Micro-Batching</h4>
-              <p className="text-xs text-[#A8B3C7] leading-relaxed">
-                An optional scheduler groups requests into sub-10ms micro-batches, assigns sequential numbers, measures queue delay, and dampens thundering-herd database strain.
-              </p>
-            </div>
-
-            {/* Capability 6 */}
-            <div className="bg-[#111C2E] border border-[#293548] rounded-xl p-6 space-y-3">
-              <div className="w-10 h-10 rounded-lg bg-[#60A5FA]/10 flex items-center justify-center text-[#60A5FA]">
-                <Activity className="w-5 h-5" />
-              </div>
-              <h4 className="text-base font-semibold text-[#F8FAFC]">Real Observability</h4>
-              <p className="text-xs text-[#A8B3C7] leading-relaxed">
-                Live metrics stream p50, p95, and p99 latencies, collision rejection rates, worker backlog, and an experimental ML autoregressive traffic-spike forecaster.
-              </p>
-            </div>
-
-          </div>
-
+      <section className="flash-bottom-banner">
+        <div className="flash-shell flash-bottom-inner">
+          <div><span className="flash-kicker">THE GOOD STUFF DOESN’T WAIT</span><h2>Find a plan. Grab your people. Go.</h2></div>
+          <button onClick={() => browse()}>Explore all events <ArrowRight size={17} /></button>
         </div>
       </section>
-
-      {/* Live System Architecture Diagram Section */}
-      <section className="py-20 bg-[#111C2E]/40 border-t border-[#293548]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          
-          <div className="text-center max-w-2xl mx-auto mb-12">
-            <h2 className="text-xs font-mono uppercase tracking-wider text-[#2DD4BF] font-semibold mb-2">
-              Data Flow & Invariant Enforcement
-            </h2>
-            <h3 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F8FAFC]">
-              How PulseReserve Prevents Double Bookings
-            </h3>
-          </div>
-
-          <div className="bg-[#111C2E] border border-[#293548] rounded-2xl p-8 max-w-5xl mx-auto">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 relative">
-              
-              <div className="bg-[#0B1220] border border-[#293548] rounded-xl p-5 space-y-2">
-                <div className="text-xs font-mono text-[#A8B3C7]">Step 01</div>
-                <div className="text-sm font-semibold text-[#F8FAFC]">Client Request</div>
-                <p className="text-xs text-[#A8B3C7]">
-                  User requests seat with optional idempotency key. Token-bucket rate limiter admits request.
-                </p>
-              </div>
-
-              <div className="bg-[#0B1220] border border-[#293548] rounded-xl p-5 space-y-2">
-                <div className="text-xs font-mono text-[#2DD4BF]">Step 02</div>
-                <div className="text-sm font-semibold text-[#F8FAFC]">Redis Lua Fencing</div>
-                <p className="text-xs text-[#A8B3C7]">
-                  Atomic script inspects seat status. Exactly one request wins hold; competing requests receive 409 collision rejection.
-                </p>
-              </div>
-
-              <div className="bg-[#0B1220] border border-[#293548] rounded-xl p-5 space-y-2">
-                <div className="text-xs font-mono text-[#60A5FA]">Step 03</div>
-                <div className="text-sm font-semibold text-[#F8FAFC]">PostgreSQL Source</div>
-                <p className="text-xs text-[#A8B3C7]">
-                  Database enforces UNIQUE constraint on (event_id, unit_id). Booking persisted with outbox event.
-                </p>
-              </div>
-
-              <div className="bg-[#0B1220] border border-[#293548] rounded-xl p-5 space-y-2">
-                <div className="text-xs font-mono text-[#10B981]">Step 04</div>
-                <div className="text-sm font-semibold text-[#F8FAFC]">Self-Healing Loop</div>
-                <p className="text-xs text-[#A8B3C7]">
-                  Worker clears unconfirmed holds past 300s. Periodic reconciler heals discrepancies safely.
-                </p>
-              </div>
-
-            </div>
-
-            <div className="mt-8 pt-6 border-t border-[#293548] flex flex-wrap items-center justify-between gap-4 text-xs text-[#A8B3C7]">
-              <div className="flex items-center gap-2">
-                <span className="text-[#2DD4BF] font-semibold">Zero Phantom Holds:</span>
-                <span>Browser countdown is display-only; server timestamp governs validation.</span>
-              </div>
-              <button
-                onClick={() => onNavigate('seats')}
-                className="text-[#2DD4BF] hover:underline font-semibold"
-              >
-                Launch Reservation Flow →
-              </button>
-            </div>
-          </div>
-
-        </div>
-      </section>
-
     </div>
   );
 };

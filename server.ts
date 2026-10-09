@@ -16,7 +16,7 @@ async function startProductionServer() {
   app.use(express.static(distPath));
 
   // SPA fallback for frontend client routing
-  app.get('*', (req, res, next) => {
+  app.get('/{*path}', (req, res, next) => {
     if (req.path.startsWith('/api')) {
       return next();
     }
