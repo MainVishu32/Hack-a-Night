@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   Ticket,
   Search,
@@ -11,7 +11,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { api } from '../services/api.ts';
-import { Booking } from '../types/index.ts';
+import type { Booking } from '../types/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
 interface BookingHistoryPageProps {
@@ -22,16 +22,19 @@ export const BookingHistoryPage: React.FC<BookingHistoryPageProps> = ({ onNaviga
   const { user } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTicket, setSelectedTicket] = useState<Booking | null>(null);
 
   const loadBookings = async () => {
     try {
       setLoading(true);
+      setLoadError('');
       const res = await api.getBookings();
       setBookings(res.bookings);
     } catch (err) {
       console.error('Failed to load bookings:', err);
+      setLoadError(err instanceof Error ? err.message : 'Could not load your tickets.');
     } finally {
       setLoading(false);
     }
@@ -57,16 +60,16 @@ export const BookingHistoryPage: React.FC<BookingHistoryPageProps> = ({ onNaviga
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-[#293548]">
           <div>
-            <div className="text-xs uppercase tracking-wider text-[#2DD4BF] font-semibold font-mono">
-              PostgreSQL Verified Records
+            <div className="text-xs uppercase tracking-wider text-[#2DD4BF] font-semibold">
+              {user?.role === 'admin' ? 'Booking overview' : 'Your plans, all in one place'}
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F8FAFC]">
-              {user?.role === 'admin' ? 'Booking Reports' : 'My Booking History'}
+              {user?.role === 'admin' ? 'Booking reports' : 'My tickets'}
             </h1>
             <p className="text-xs text-[#A8B3C7] mt-1">
               {user?.role === 'admin'
-                ? 'Observability view: Showing all bookings across participants.'
-                : 'Showing confirmed reservations issued to your authenticated account.'}
+                ? 'Confirmed tickets across all attendees.'
+                : 'Your confirmed tickets are ready when you are.'}
             </p>
           </div>
 
@@ -75,7 +78,7 @@ export const BookingHistoryPage: React.FC<BookingHistoryPageProps> = ({ onNaviga
               <Search className="w-4 h-4 text-[#A8B3C7] absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search reference or seat..."
+                placeholder="Search tickets..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="pl-9 pr-3 py-1.5 bg-[#111C2E] border border-[#293548] rounded-lg text-xs text-[#F8FAFC] placeholder-[#A8B3C7]/40 focus:outline-none focus:border-[#2DD4BF]"
@@ -98,20 +101,25 @@ export const BookingHistoryPage: React.FC<BookingHistoryPageProps> = ({ onNaviga
             <RefreshCw className="w-5 h-5 animate-spin text-[#2DD4BF] mx-auto mb-2" />
             <span>Retrieving confirmed booking records...</span>
           </div>
+        ) : loadError ? (
+          <div className="bg-[#111C2E] border border-[#293548] rounded-2xl p-10 text-center" role="alert">
+            <p className="text-sm text-[#777777]">We couldnâ€™t load your tickets. {loadError}</p>
+            <button onClick={loadBookings} className="mt-4 rounded-lg bg-[#2DD4BF] px-4 py-2 text-sm font-semibold text-white">Try again</button>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="bg-[#111C2E] border border-[#293548] rounded-2xl p-12 text-center space-y-4 max-w-lg mx-auto">
             <Ticket className="w-10 h-10 text-[#293548] mx-auto" />
             <div>
-              <h2 className="text-base font-bold text-[#F8FAFC]">No Confirmed Bookings Found</h2>
+              <h2 className="text-base font-bold text-[#F8FAFC]">No tickets just yet</h2>
               <p className="text-xs text-[#A8B3C7] mt-1">
-                You haven't completed any reservations yet. Select an available unit on the 200-seat arena grid to get started.
+                Find an event you love and your tickets will show up here.
               </p>
             </div>
             <button
-              onClick={() => onNavigate('seats')}
+              onClick={() => onNavigate('events')}
               className="px-4 py-2.5 rounded-lg text-xs font-semibold text-[#0B1220] bg-[#2DD4BF] hover:bg-[#2DD4BF]/90 transition-colors shadow-sm inline-flex items-center gap-1.5"
             >
-              <span>Explore Live Seat Grid</span>
+              <span>Explore events</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -191,7 +199,7 @@ export const BookingHistoryPage: React.FC<BookingHistoryPageProps> = ({ onNaviga
                 <h3 className="text-xl font-bold text-[#F8FAFC] mt-1">{selectedTicket.eventTitle}</h3>
                 <div className="text-xs text-[#A8B3C7] flex items-center gap-1.5 mt-1">
                   <MapPin className="w-3.5 h-3.5 text-[#60A5FA]" />
-                  <span>{selectedTicket.venue || 'Metropolis Convention Arena · Grand Hall A'}</span>
+                  <span>{selectedTicket.venue || 'Metropolis Convention Arena Â· Grand Hall A'}</span>
                 </div>
               </div>
 
@@ -217,8 +225,8 @@ export const BookingHistoryPage: React.FC<BookingHistoryPageProps> = ({ onNaviga
               {/* Digital Check-in QR Simulation */}
               <div className="p-4 bg-[#0B1220] border border-[#293548] rounded-xl flex items-center justify-between gap-4">
                 <div className="text-left text-xs">
-                  <span className="font-mono text-[#10B981] text-[11px] block">VERIFIED IN POSTGRESQL</span>
-                  <span className="text-[#A8B3C7] text-[11px]">Present at gate for high-speed barcode validation.</span>
+                  <span className="font-semibold text-[#10B981] text-[11px] block">YOUR TICKET IS CONFIRMED</span>
+                  <span className="text-[#A8B3C7] text-[11px]">Keep your booking reference handy when you arrive.</span>
                 </div>
                 <div className="w-14 h-14 bg-[#111C2E] border border-[#293548] rounded-lg flex items-center justify-center text-[#2DD4BF] shrink-0">
                   <QrCode className="w-10 h-10" />

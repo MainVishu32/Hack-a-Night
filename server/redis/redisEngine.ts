@@ -1,384 +1,79 @@
-import { db, InventoryUnitRecord } from '../db/database.js';
+import { createClient } from 'redis';
+import type { InventoryUnitRecord } from '../db/database.js';
+import { CLAIM_HOLD_LUA, CONFIRM_HOLD_LUA, RELEASE_HOLD_LUA, RECONCILE_RELEASE_EXPIRED_LUA, TOKEN_BUCKET_RATE_LIMIT_LUA } from './luaScripts.js';
 
-export interface RedisUnitState {
-  status: 'AVAILABLE' | 'HELD' | 'CONFIRMED' | 'RELEASING';
-  userId: string;
-  holdToken: string;
-  generation: number;
-  expiresAt: number;
-  claimedAt: number;
-  confirmedAt?: number;
-}
+export interface RedisUnitState { status: 'AVAILABLE'|'HELD'|'CONFIRMED'|'RELEASING'; userId:string; holdToken:string; generation:number; expiresAt:number; claimedAt:number; confirmedAt?:number; }
+export interface ClaimResult { success:boolean; generation?:number; expiresAt?:number; reason?:string; }
+export interface ConfirmResult { success:boolean; status:string; generation?:number; reason?:string; }
+export interface ReleaseResult { success:boolean; reason?:string; generation?:number; }
+export interface RateLimitResult { allowed:boolean; remainingTokens:number; }
 
-export interface ClaimResult {
-  success: boolean;
-  generation?: number;
-  expiresAt?: number;
-  reason?: string;
-}
-
-export interface ConfirmResult {
-  success: boolean;
-  status: string;
-  generation?: number;
-  reason?: string;
-}
-
-export interface ReleaseResult {
-  success: boolean;
-  reason?: string;
-  generation?: number;
-}
-
-export interface RateLimitResult {
-  allowed: boolean;
-  remainingTokens: number;
-}
-
-/**
- * PulseReserve Redis Coordination Engine
- * Guarantees serializable atomic transactions, Lua execution semantics,
- * and generation fencing tokens.
- */
+/** Real Redis-backed inventory coordinator. No in-memory fallback is used: a missing Redis connection is a startup error. */
 class RedisCoordinationEngine {
-  private keyStore = new Map<string, Record<string, string>>();
-  private ttlStore = new Map<string, NodeJS.Timeout>();
-  private rateLimitStore = new Map<string, { tokens: number; lastUpdated: number }>();
+  
+private client: ReturnType<typeof createClient> | null = null;
 
-  // Mutex lock to emulate Redis single-threaded atomic command execution
-  private executionQueue: Promise<any> = Promise.resolve();
-  private isConnected = true;
-  private totalCommandsExecuted = 0;
-  private luaScriptsExecuted = 0;
-
-  constructor() {
-    this.isConnected = true;
+  private connected = false;
+  private commands = 0;
+  private scripts = 0;
+  private knownKeys = new Set<string>();
+  async connect() {
+    if (this.connected) return;
+    const url = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+    const client = createClient({ url, socket: { reconnectStrategy: retries => Math.min(retries * 250, 3000) } });
+    client.on('error', err => console.error('[PulseReserve] Redis error:', err.message));
+    await client.connect();
+    await client.ping();
+    this.client = client;
+    this.connected = true;
+    console.log(`[PulseReserve] Connected to Redis at ${url.replace(/:\/\/.*@/, '://[credentials]@')}`);
   }
-
-  private runAtomic<T>(fn: () => T): Promise<T> {
-    const next = this.executionQueue.then(async () => {
-      this.totalCommandsExecuted++;
-      return fn();
-    });
-    this.executionQueue = next.catch(() => {});
-    return next;
+  async close() { if (this.client?.isOpen) await this.client.quit(); this.connected = false; this.client = null; }
+  
+private get redis(): NonNullable<typeof this.client> { if (!this.client || !this.connected) throw new Error('Redis is not connected. Start Redis and configure REDIS_URL.'); return this.client; }
+  private key(eventId:string, unitId:string) { return `inventory:${eventId}:${unitId}`; }
+  async syncWithDatabase(units: InventoryUnitRecord[]) {
+    const r = this.redis;
+    for (const u of units) {
+      const key = this.key(u.event_id,u.id); this.knownKeys.add(key);
+      // Preserve active Redis coordination state on app restarts; seed only absent keys.
+      const exists = await r.exists(key);
+      if (!exists) await r.hSet(key, { status:u.status, user_id:'', hold_token:'', generation:String(u.current_generation), expires_at:'0', claimed_at:'0' });
+    }
+    return true;
   }
-
-  /**
-   * Initializes Redis state from PostgreSQL database on startup
-   */
-  public async syncWithDatabase(units: InventoryUnitRecord[]) {
-    return this.runAtomic(() => {
-      for (const unit of units) {
-        const key = `inventory:${unit.event_id}:${unit.id}`;
-        this.keyStore.set(key, {
-          status: unit.status,
-          user_id: '',
-          hold_token: '',
-          generation: unit.current_generation.toString(),
-          expires_at: '0',
-          claimed_at: '0'
-        });
-      }
-      return true;
-    });
+  async claimHold(eventId:string, unitId:string, userId:string, holdToken:string, holdDurationMs:number):Promise<ClaimResult> {
+    this.commands++; this.scripts++; this.knownKeys.add(this.key(eventId,unitId));
+    const out = await this.redis.eval(CLAIM_HOLD_LUA,{keys:[this.key(eventId,unitId)],arguments:[userId,holdToken,String(holdDurationMs),String(Date.now())]}) as (string|number)[];
+    if (Number(out[0]) === 1) return {success:true,generation:Number(out[1]),expiresAt:Number(out[2])};
+    const state=String(out[1] ?? 'UNAVAILABLE');
+    return {success:false,reason:state==='CONFIRMED'?'ALREADY_CONFIRMED':state==='HELD'?'ALREADY_HELD':state==='NOT_FOUND'?'INVENTORY_NOT_INITIALIZED':state};
   }
-
-  /**
-   * ATOMIC CLAIM HOLD (Executes CLAIM_HOLD_LUA)
-   */
-  public async claimHold(
-    eventId: string,
-    unitId: string,
-    userId: string,
-    holdToken: string,
-    holdDurationMs: number
-  ): Promise<ClaimResult> {
-    return this.runAtomic(() => {
-      this.luaScriptsExecuted++;
-      const key = `inventory:${eventId}:${unitId}`;
-      const nowMs = Date.now();
-      const current = this.keyStore.get(key);
-
-      const status = current?.status || 'AVAILABLE';
-      const currentGen = parseInt(current?.generation || '0', 10);
-      const expiresAt = parseInt(current?.expires_at || '0', 10);
-
-      // Check if unit is available or hold has expired
-      if (!current || status === 'AVAILABLE' || (status === 'HELD' && expiresAt <= nowMs)) {
-        const nextGen = currentGen + 1;
-        const newExpiresAt = nowMs + holdDurationMs;
-
-        const updatedData: Record<string, string> = {
-          status: 'HELD',
-          user_id: userId,
-          hold_token: holdToken,
-          generation: nextGen.toString(),
-          expires_at: newExpiresAt.toString(),
-          claimed_at: nowMs.toString()
-        };
-        this.keyStore.set(key, updatedData);
-
-        // Schedule TTL expiry cleanup
-        if (this.ttlStore.has(key)) {
-          clearTimeout(this.ttlStore.get(key)!);
-        }
-        const timeout = setTimeout(() => {
-          this.handleTtlExpiry(key, nextGen);
-        }, holdDurationMs + 2000);
-        this.ttlStore.set(key, timeout);
-
-        return {
-          success: true,
-          generation: nextGen,
-          expiresAt: newExpiresAt
-        };
-      }
-
-      // Slot is occupied
-      return {
-        success: false,
-        reason: status === 'CONFIRMED' ? 'ALREADY_CONFIRMED' : 'ALREADY_HELD',
-        expiresAt
-      };
-    });
+  async confirmHold(eventId:string, unitId:string, userId:string, holdToken:string, expectedGeneration:number):Promise<ConfirmResult> {
+    this.commands++; this.scripts++;
+    const out = await this.redis.eval(CONFIRM_HOLD_LUA,{keys:[this.key(eventId,unitId)],arguments:[userId,holdToken,String(expectedGeneration),String(Date.now())]}) as (string|number)[];
+    const ok=Number(out[0])===1, status=String(out[1]??'UNKNOWN');
+    return {success:ok,status,generation:out[2]===undefined?undefined:Number(out[2]),reason:ok?undefined:status};
   }
-
-  /**
-   * ATOMIC CONFIRM HOLD (Executes CONFIRM_HOLD_LUA)
-   */
-  public async confirmHold(
-    eventId: string,
-    unitId: string,
-    userId: string,
-    holdToken: string,
-    expectedGeneration: number
-  ): Promise<ConfirmResult> {
-    return this.runAtomic(() => {
-      this.luaScriptsExecuted++;
-      const key = `inventory:${eventId}:${unitId}`;
-      const nowMs = Date.now();
-      const current = this.keyStore.get(key);
-
-      if (!current) {
-        return { success: false, status: 'NOT_FOUND', reason: 'Unit record missing in cache' };
-      }
-
-      const status = current.status;
-      const currentToken = current.hold_token;
-      const currentGen = parseInt(current.generation || '0', 10);
-      const expiresAt = parseInt(current.expires_at || '0', 10);
-
-      if (status === 'CONFIRMED') {
-        if (currentToken === holdToken) {
-          return { success: true, status: 'ALREADY_CONFIRMED', generation: currentGen };
-        }
-        return { success: false, status: 'ALREADY_CONFIRMED', reason: 'Confirmed by another participant' };
-      }
-
-      if (status !== 'HELD') {
-        return { success: false, status, reason: `Invalid status ${status}` };
-      }
-
-      if (currentGen !== expectedGeneration) {
-        return { success: false, status: 'STALE_GENERATION', reason: `Stale generation token: expected ${currentGen}, got ${expectedGeneration}` };
-      }
-
-      if (currentToken !== holdToken) {
-        return { success: false, status: 'INVALID_HOLD_TOKEN', reason: 'Hold token verification mismatch' };
-      }
-
-      if (expiresAt <= nowMs) {
-        return { success: false, status: 'HOLD_EXPIRED', reason: 'Hold expired before confirmation arrived' };
-      }
-
-      // Transition to CONFIRMED
-      const nextGen = currentGen + 1;
-      current.status = 'CONFIRMED';
-      current.generation = nextGen.toString();
-      current.confirmed_at = nowMs.toString();
-      this.keyStore.set(key, current);
-
-      // Cancel temporary TTL
-      if (this.ttlStore.has(key)) {
-        clearTimeout(this.ttlStore.get(key)!);
-        this.ttlStore.delete(key);
-      }
-
-      return {
-        success: true,
-        status: 'CONFIRMED',
-        generation: nextGen
-      };
-    });
+  async releaseHold(eventId:string,unitId:string,holdToken:string,expectedGeneration:number):Promise<ReleaseResult> {
+    this.commands++; this.scripts++;
+    const out = await this.redis.eval(RELEASE_HOLD_LUA,{keys:[this.key(eventId,unitId)],arguments:[holdToken,String(expectedGeneration)]}) as (string|number)[];
+    return {success:Number(out[0])===1,reason:String(out[1]??'UNKNOWN'),generation:out[2]===undefined?undefined:Number(out[2])};
   }
-
-  /**
-   * ATOMIC RELEASE HOLD (Executes RELEASE_HOLD_LUA)
-   */
-  public async releaseHold(
-    eventId: string,
-    unitId: string,
-    holdToken: string,
-    expectedGeneration: number
-  ): Promise<ReleaseResult> {
-    return this.runAtomic(() => {
-      this.luaScriptsExecuted++;
-      const key = `inventory:${eventId}:${unitId}`;
-      const current = this.keyStore.get(key);
-
-      if (!current || current.status === 'AVAILABLE') {
-        return { success: true, reason: 'ALREADY_AVAILABLE' };
-      }
-
-      if (current.status === 'CONFIRMED') {
-        return { success: false, reason: 'CANNOT_RELEASE_CONFIRMED_UNIT' };
-      }
-
-      const currentGen = parseInt(current.generation || '0', 10);
-      if (currentGen !== expectedGeneration) {
-        return { success: false, reason: 'STALE_GENERATION_PREVENTED_CORRUPTION' };
-      }
-
-      if (current.hold_token !== holdToken) {
-        return { success: false, reason: 'HOLD_TOKEN_MISMATCH' };
-      }
-
-      const nextGen = currentGen + 1;
-      this.keyStore.set(key, {
-        status: 'AVAILABLE',
-        user_id: '',
-        hold_token: '',
-        generation: nextGen.toString(),
-        expires_at: '0',
-        claimed_at: '0'
-      });
-
-      if (this.ttlStore.has(key)) {
-        clearTimeout(this.ttlStore.get(key)!);
-        this.ttlStore.delete(key);
-      }
-
-      return { success: true, reason: 'RELEASED', generation: nextGen };
-    });
+  async reconcileReleaseExpired(eventId:string,unitId:string,expectedGeneration:number):Promise<boolean> {
+    this.commands++; this.scripts++;
+    const out=await this.redis.eval(RECONCILE_RELEASE_EXPIRED_LUA,{keys:[this.key(eventId,unitId)],arguments:[String(expectedGeneration),String(Date.now())]}) as (string|number)[];
+    return Number(out[0])===1;
   }
-
-  /**
-   * RECONCILER EXPIRED CLEANUP
-   */
-  public async reconcileReleaseExpired(
-    eventId: string,
-    unitId: string,
-    expectedGeneration: number
-  ): Promise<boolean> {
-    return this.runAtomic(() => {
-      this.luaScriptsExecuted++;
-      const key = `inventory:${eventId}:${unitId}`;
-      const nowMs = Date.now();
-      const current = this.keyStore.get(key);
-
-      if (!current) return false;
-
-      const currentGen = parseInt(current.generation || '0', 10);
-      const expiresAt = parseInt(current.expires_at || '0', 10);
-
-      if (current.status === 'HELD' && currentGen === expectedGeneration && expiresAt <= nowMs) {
-        const nextGen = currentGen + 1;
-        this.keyStore.set(key, {
-          status: 'AVAILABLE',
-          user_id: '',
-          hold_token: '',
-          generation: nextGen.toString(),
-          expires_at: '0',
-          claimed_at: '0'
-        });
-        if (this.ttlStore.has(key)) {
-          clearTimeout(this.ttlStore.get(key)!);
-          this.ttlStore.delete(key);
-        }
-        return true;
-      }
-      return false;
-    });
+  async checkRateLimit(clientKey:string,maxTokens=60,refillRate=10):Promise<RateLimitResult> {
+    this.commands++; this.scripts++;
+    const out=await this.redis.eval(TOKEN_BUCKET_RATE_LIMIT_LUA,{keys:[`ratelimit:${clientKey}`],arguments:[String(maxTokens),String(refillRate),String(Date.now()/1000)]}) as (string|number)[];
+    return {allowed:Number(out[0])===1,remainingTokens:Math.floor(Number(out[1]??0))};
   }
-
-  private handleTtlExpiry(key: string, generationExpected: number) {
-    this.runAtomic(() => {
-      const current = this.keyStore.get(key);
-      if (!current) return;
-      const gen = parseInt(current.generation || '0', 10);
-      const expiresAt = parseInt(current.expires_at || '0', 10);
-      if (current.status === 'HELD' && gen === generationExpected && expiresAt <= Date.now()) {
-        const nextGen = gen + 1;
-        this.keyStore.set(key, {
-          status: 'AVAILABLE',
-          user_id: '',
-          hold_token: '',
-          generation: nextGen.toString(),
-          expires_at: '0',
-          claimed_at: '0'
-        });
-      }
-    });
+  async getUnitState(eventId:string,unitId:string):Promise<RedisUnitState|null> {
+    const key=this.key(eventId,unitId); this.knownKeys.add(key); const d=await this.redis.hGetAll(key); if (!Object.keys(d).length) return null;
+    return {status:(d.status||'AVAILABLE') as RedisUnitState['status'],userId:d.user_id||'',holdToken:d.hold_token||'',generation:Number(d.generation||0),expiresAt:Number(d.expires_at||0),claimedAt:Number(d.claimed_at||0),confirmedAt:d.confirmed_at?Number(d.confirmed_at):undefined};
   }
-
-  /**
-   * TOKEN BUCKET RATE LIMITER
-   */
-  public async checkRateLimit(
-    clientKey: string,
-    maxTokens = 60,
-    refillRate = 10
-  ): Promise<RateLimitResult> {
-    return this.runAtomic(() => {
-      const nowSec = Date.now() / 1000;
-      let bucket = this.rateLimitStore.get(clientKey);
-
-      if (!bucket) {
-        bucket = { tokens: maxTokens - 1, lastUpdated: nowSec };
-        this.rateLimitStore.set(clientKey, bucket);
-        return { allowed: true, remainingTokens: maxTokens - 1 };
-      }
-
-      const delta = Math.max(0, nowSec - bucket.lastUpdated);
-      bucket.tokens = Math.min(maxTokens, bucket.tokens + delta * refillRate);
-      bucket.lastUpdated = nowSec;
-
-      if (bucket.tokens >= 1) {
-        bucket.tokens -= 1;
-        this.rateLimitStore.set(clientKey, bucket);
-        return { allowed: true, remainingTokens: Math.floor(bucket.tokens) };
-      }
-
-      this.rateLimitStore.set(clientKey, bucket);
-      return { allowed: false, remainingTokens: 0 };
-    });
-  }
-
-  public async getUnitState(eventId: string, unitId: string): Promise<RedisUnitState | null> {
-    const key = `inventory:${eventId}:${unitId}`;
-    const data = this.keyStore.get(key);
-    if (!data) return null;
-    return {
-      status: (data.status as any) || 'AVAILABLE',
-      userId: data.user_id || '',
-      holdToken: data.hold_token || '',
-      generation: parseInt(data.generation || '0', 10),
-      expiresAt: parseInt(data.expires_at || '0', 10),
-      claimedAt: parseInt(data.claimed_at || '0', 10),
-      confirmedAt: data.confirmed_at ? parseInt(data.confirmed_at, 10) : undefined
-    };
-  }
-
-  public getStats() {
-    return {
-      connected: this.isConnected,
-      activeKeysCount: this.keyStore.size,
-      totalCommandsExecuted: this.totalCommandsExecuted,
-      luaScriptsExecuted: this.luaScriptsExecuted,
-      activeTimers: this.ttlStore.size
-    };
-  }
+  getStats(){return {connected:this.connected,activeKeysCount:this.knownKeys.size,totalCommandsExecuted:this.commands,luaScriptsExecuted:this.scripts,activeTimers:0};}
 }
-
 export const redisEngine = new RedisCoordinationEngine();

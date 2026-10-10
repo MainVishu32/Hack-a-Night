@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
   Activity,
@@ -17,7 +17,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { api } from '../services/api.ts';
-import { AdminMetrics, ReconciliationReport, AuditLog, MLForecast } from '../types/index.ts';
+import type { AdminMetrics, ReconciliationReport, AuditLog, MLForecast } from '../types/index.ts';
 import { useAuth } from '../context/AuthContext.tsx';
 
 interface AdminObservabilityPageProps {
@@ -602,7 +602,7 @@ export const AdminObservabilityPage: React.FC<AdminObservabilityPageProps> = ({ 
                   <div className="p-4 bg-[#0B1220] rounded-xl border border-[#293548]">
                     <span className="text-[#A8B3C7] block">Confidence (95%)</span>
                     <span className="text-base font-bold text-[#60A5FA] mt-1">
-                      [{forecast.confidenceInterval.lowerRps} – {forecast.confidenceInterval.upperRps}]
+                      [{forecast.confidenceInterval.lowerRps} â€“ {forecast.confidenceInterval.upperRps}]
                     </span>
                   </div>
                 </div>

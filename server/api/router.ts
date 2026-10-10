@@ -1,6 +1,8 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { db } from '../db/database.js';
-import { AuthService, UserSessionPayload } from '../services/authService.js';
+import { AuthService } from '../services/authService.js';
+import type { UserSessionPayload } from '../services/authService.js';
 import { ReservationService } from '../services/reservationService.js';
 import { redisEngine } from '../redis/redisEngine.js';
 import { worker } from '../services/worker.js';
@@ -221,7 +223,10 @@ apiRouter.get('/events', async (req: Request, res: Response) => {
 });
 
 apiRouter.get('/events/:eventId/inventory', async (req: Request, res: Response) => {
-  const { eventId } = req.params;
+  const eventId = req.params.eventId;
+if (typeof eventId !== 'string') {
+  return res.status(400).json({ error: 'Invalid event ID' });
+}
   const event = await db.getEventById(eventId);
   if (!event) {
     return res.status(404).json({ error: 'Not Found', message: 'Event not found' });
@@ -323,7 +328,10 @@ apiRouter.post('/reservations/hold', requireAuth, async (req: Request, res: Resp
 });
 
 apiRouter.get('/reservations/:reservationId', requireAuth, async (req: Request, res: Response) => {
-  const { reservationId } = req.params;
+  const reservationId = req.params.reservationId;
+if (typeof reservationId !== 'string') {
+  return res.status(400).json({ error: 'Invalid reservation ID' });
+}
   const reservation = await db.getReservationById(reservationId);
   if (!reservation) {
     return res.status(404).json({ error: 'Not Found', message: 'Reservation not found' });
@@ -346,7 +354,10 @@ apiRouter.get('/reservations/:reservationId', requireAuth, async (req: Request, 
 
 apiRouter.post('/reservations/:reservationId/confirm', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { reservationId } = req.params;
+    const reservationId = req.params.reservationId;
+if (typeof reservationId !== 'string') {
+  return res.status(400).json({ error: 'Invalid reservation ID' });
+}
     const { idempotencyKey, simulatedPaymentToken } = req.body;
 
     const result = await scheduler.enqueue(() =>
@@ -373,7 +384,10 @@ apiRouter.post('/reservations/:reservationId/confirm', requireAuth, async (req: 
 
 apiRouter.post('/reservations/:reservationId/cancel', requireAuth, async (req: Request, res: Response) => {
   try {
-    const { reservationId } = req.params;
+    const reservationId = req.params.reservationId;
+if (typeof reservationId !== 'string') {
+  return res.status(400).json({ error: 'Invalid reservation ID' });
+}
     const result = await ReservationService.cancelHold({
       reservationId,
       userId: req.user!.userId
@@ -423,7 +437,10 @@ apiRouter.get('/bookings', requireAuth, async (req: Request, res: Response) => {
 });
 
 apiRouter.get('/bookings/:bookingId', requireAuth, async (req: Request, res: Response) => {
-  const { bookingId } = req.params;
+  const bookingId = req.params.bookingId;
+if (typeof bookingId !== 'string') {
+  return res.status(400).json({ error: 'Invalid booking ID' });
+}
   const booking = await db.getBookingById(bookingId);
   if (!booking) {
     return res.status(404).json({ error: 'Not Found', message: 'Booking not found' });

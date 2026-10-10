@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Menu, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
-import { ShieldCheck } from 'lucide-react';
 
 interface NavbarProps {
   currentPage: string;
@@ -9,39 +9,63 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate }) => {
   const { user, logout } = useAuth();
-  const linkClass = (active: boolean) => `transition-colors whitespace-nowrap ${active ? 'text-[#2DD4BF] font-semibold' : 'text-[#A8B3C7] hover:text-[#F8FAFC]'}`;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const go = (page: string) => {
+    setMenuOpen(false);
+    onNavigate(page);
+  };
+  const linkClass = (active: boolean) => `flash-nav-link${active ? ' is-active' : ''}`;
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-[#293548] bg-[#0B1220]/95 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
-        <button onClick={() => onNavigate(user?.role === 'admin' ? 'dashboard' : 'landing')} className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-lg font-bold tracking-tight text-[#F8FAFC] transition-colors hover:text-[#2DD4BF]">
-          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-tr from-[#2DD4BF] to-[#60A5FA] text-sm font-black text-[#0B1220]">P</span>
-          <span>PulseReserve</span>
+    <header className="flash-header">
+      <div className="flash-nav-shell">
+        <button onClick={() => go(user?.role === 'admin' ? 'dashboard' : 'landing')} className="flash-brand" aria-label="Spotly home">
+          <img src="/spotly-logo.png" alt="Spotly" />
         </button>
 
-        <nav className="hidden items-center gap-5 text-sm font-medium md:flex">
-          <button onClick={() => onNavigate('landing')} className={linkClass(currentPage === 'landing')}>Home</button>
-          {user?.role === 'admin' && <>
-            <button onClick={() => onNavigate('admin')} className={linkClass(currentPage === 'admin' || currentPage === 'dashboard')}><ShieldCheck className="mr-1 inline h-4 w-4" />Operations Dashboard</button>
-            <button onClick={() => onNavigate('admin')} className={linkClass(currentPage === 'admin')}>Reports & Controls</button>
-            <button onClick={() => onNavigate('bookings')} className={linkClass(currentPage === 'bookings')}>Booking Reports</button>
-          </>}
-          {user?.role !== 'admin' && <>
-            <button onClick={() => onNavigate('events')} className={linkClass(currentPage === 'events' || currentPage === 'seats')}>Browse Shows</button>
-            {user && <button onClick={() => onNavigate('bookings')} className={linkClass(currentPage === 'bookings')}>My Bookings</button>}
-          </>}
+        <nav className="flash-desktop-nav" aria-label="Main navigation">
+          <button onClick={() => go('landing')} className={linkClass(currentPage === 'landing')}>Home</button>
+          {user?.role === 'admin' ? (
+            <>
+              <button onClick={() => go('admin')} className={linkClass(currentPage === 'admin' || currentPage === 'dashboard')}><ShieldCheck size={15} />Operations</button>
+              <button onClick={() => go('bookings')} className={linkClass(currentPage === 'bookings')}>Booking reports</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => go('events')} className={linkClass(currentPage === 'events' || currentPage === 'seats')}>Explore events</button>
+              {user && <button onClick={() => go('bookings')} className={linkClass(currentPage === 'bookings')}>My tickets</button>}
+            </>
+          )}
         </nav>
 
-        <div className="flex shrink-0 items-center gap-3">
-          {user ? <div className="flex items-center gap-3">
-            <div className="hidden flex-col text-right text-xs sm:flex"><span className="leading-none font-medium text-[#F8FAFC]">{user.name}</span><span className="text-[11px] leading-tight font-mono text-[#A8B3C7]">{user.role === 'admin' ? 'ADMINISTRATOR' : 'ATTENDEE'}</span></div>
-            <button onClick={() => { void logout().then(() => onNavigate('landing')); }} className="whitespace-nowrap rounded-lg border border-[#293548] px-3.5 py-1.5 text-xs font-medium text-[#A8B3C7] transition-colors hover:border-[#EF4444]/40 hover:text-[#EF4444]">Sign Out</button>
-          </div> : <div className="flex items-center gap-2">
-            <button onClick={() => onNavigate('login')} className="whitespace-nowrap px-3.5 py-1.5 text-xs font-medium text-[#F8FAFC] transition-colors hover:text-[#2DD4BF]">Sign In</button>
-            <button onClick={() => onNavigate('register')} className="whitespace-nowrap rounded-lg bg-[#2DD4BF] px-4 py-2 text-xs font-semibold text-[#0B1220] shadow-sm transition hover:bg-[#2DD4BF]/90">Create Account</button>
-          </div>}
+        <div className="flash-nav-actions">
+          {user ? (
+            <>
+              <span className="flash-user-name">{user.name}</span>
+              <button onClick={() => { void logout().then(() => go('landing')); }} className="flash-outline-button">Sign out</button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => go('login')} className="flash-signin">Sign in</button>
+              <button onClick={() => go('register')} className="flash-account-button">Join for free</button>
+            </>
+          )}
         </div>
+        <button className="flash-menu-toggle" onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen}>
+          {menuOpen ? <X size={21} /> : <Menu size={21} />}
+        </button>
       </div>
+      {menuOpen && (
+        <nav className="flash-mobile-nav" aria-label="Mobile navigation">
+          <button onClick={() => go('landing')}>Home</button>
+          {user?.role === 'admin' ? (
+            <><button onClick={() => go('admin')}>Operations dashboard</button><button onClick={() => go('bookings')}>Booking reports</button></>
+          ) : (
+            <><button onClick={() => go('events')}>Explore events</button>{user && <button onClick={() => go('bookings')}>My tickets</button>}</>
+          )}
+          {!user && <><button onClick={() => go('login')}>Sign in</button><button onClick={() => go('register')}>Join for free</button></>}
+        </nav>
+      )}
     </header>
   );
 };

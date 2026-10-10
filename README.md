@@ -17,6 +17,12 @@ The backend currently seeds one event with real seat inventory: **Global Tech Su
 
 The current database and Redis coordination adapters are in-memory demo implementations. The repository includes PostgreSQL schema and Redis Lua examples, but these are not proof of a live PostgreSQL database or Redis service. Demo data resets when the server restarts. Do not describe the project as durable production infrastructure until persistent adapters are implemented and verified.
 
+## Engine validation
+
+See `FINAL_CHECKLIST.md` and `ENGINE_VALIDATION.md` for included fixes and known gaps. The current Redis/database adapters remain in-memory demo implementations; do not describe them as live Redis/PostgreSQL.
+
+Run `npm run test:engine`, `npm run typecheck`, and `npm run build` before considering this package verified.
+
 ## Requirements
 
 - Node.js 20+ (Node 22 LTS recommended)
@@ -67,3 +73,15 @@ These are local demo credentials only. Remove or rotate them before any public d
 - `server/db/schema.sql` — PostgreSQL schema reference
 - `server/redis/luaScripts.ts` — Redis Lua examples
 - `loadtests/` — k6 contention scenario
+
+
+### Failure-handling and validation status
+See [FAILURE_HANDLING.md](./FAILURE_HANDLING.md) for the implemented compensations and the remaining real Redis/PostgreSQL integration requirements.
+
+## Real Redis + PostgreSQL setup
+
+This revision uses live Redis and PostgreSQL; the backend intentionally fails startup if either service is unavailable. Configure `DATABASE_URL` and `REDIS_URL` (see `.env.example`). The included `docker-compose.yml` starts both services and the app. Run `docker compose up --build` from the project root. Demo accounts are for local demonstration only; change credentials/secrets before any public deployment.
+
+## High-contention validation
+
+Run `k6 run loadtests/k6_reservation_concurrency.js` against the running service (override `API_URL` if needed). Then run `psql "$DATABASE_URL" -f loadtests/audit_bookings.sql`. The SQL audit must return no duplicate-booking rows and a mismatch count of zero. This environment did not have Redis/PostgreSQL/k6 available, so the live integration and 5,000-VU run are not represented as passed.

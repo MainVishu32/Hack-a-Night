@@ -1,3 +1,5 @@
+import { Pool } from 'pg';
+import { readFile } from 'node:fs/promises';
 import bcrypt from 'bcryptjs';
 
 export interface UserRecord {
@@ -88,7 +90,7 @@ export interface AuditLogRecord {
   created_at: string;
 }
 
-// In-Memory Database Store implementing relational integrity & constraints
+// PostgreSQL-backed repository with a process-local read cache.
 class DatabaseEngine {
   private users = new Map<string, UserRecord>();
   private events = new Map<string, EventRecord>();
@@ -99,12 +101,42 @@ class DatabaseEngine {
   private auditLogs: AuditLogRecord[] = [];
 
   private isInitialized = false;
+  private pool: Pool | null = null;
 
+  private get pg(): Pool { if (!this.pool) throw new Error('PostgreSQL is not initialized. Configure DATABASE_URL.'); return this.pool; }
+  private async persistSeed() {
+    const p=this.pg;
+    for (const u of this.users.values()) await p.query(`INSERT INTO users(id,name,email,password_hash,role,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING`,[u.id,u.name,u.email,u.password_hash,u.role,u.created_at,u.updated_at]);
+    for (const e of this.events.values()) await p.query(`INSERT INTO events(id,title,description,venue,starts_at,total_units,base_price,hold_duration_seconds,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO NOTHING`,[e.id,e.title,e.description,e.venue,e.starts_at,e.total_units,e.base_price,e.hold_duration_seconds,e.status,e.created_at]);
+    for (const u of this.inventoryUnits.values()) await p.query(`INSERT INTO inventory_units(id,event_id,unit_code,tier,row_label,seat_number,price,status,current_reservation_id,current_generation,version,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO NOTHING`,[u.id,u.event_id,u.unit_code,u.tier,u.row_label,u.seat_number,u.price,u.status,u.current_reservation_id,u.current_generation,u.version,u.updated_at]);
+    for (const r of this.reservations.values()) await p.query(`INSERT INTO reservations(id,event_id,unit_id,user_id,hold_token,generation,status,idempotency_key,expires_at,created_at,confirmed_at,cancelled_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO NOTHING`,[r.id,r.event_id,r.unit_id,r.user_id,r.hold_token,r.generation,r.status,r.idempotency_key||null,r.expires_at,r.created_at,r.confirmed_at||null,r.cancelled_at||null]);
+    for (const b of this.bookings.values()) await p.query(`INSERT INTO bookings(id,booking_reference,reservation_id,event_id,unit_id,user_id,amount,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO NOTHING`,[b.id,b.booking_reference,b.reservation_id,b.event_id,b.unit_id,b.user_id,b.amount,b.status,b.created_at]);
+  }
+  private async loadPersistentState() {
+    const p=this.pg;
+    const users=await p.query('SELECT * FROM users');
+    for(const r of users.rows) this.users.set(r.id,{...r,created_at:new Date(r.created_at).toISOString(),updated_at:new Date(r.updated_at).toISOString()});
+    const events=await p.query('SELECT * FROM events'); for(const r of events.rows) this.events.set(r.id,{...r,starts_at:new Date(r.starts_at).toISOString(),created_at:new Date(r.created_at).toISOString(),base_price:Number(r.base_price)});
+    const units=await p.query('SELECT * FROM inventory_units'); for(const r of units.rows) this.inventoryUnits.set(r.id,{...r,price:Number(r.price),current_generation:Number(r.current_generation),version:Number(r.version),updated_at:new Date(r.updated_at).toISOString()});
+    const reservations=await p.query('SELECT * FROM reservations'); for(const r of reservations.rows) this.reservations.set(r.id,{...r,generation:Number(r.generation),expires_at:new Date(r.expires_at).toISOString(),created_at:new Date(r.created_at).toISOString(),confirmed_at:r.confirmed_at?new Date(r.confirmed_at).toISOString():null,cancelled_at:r.cancelled_at?new Date(r.cancelled_at).toISOString():null});
+    const bookings=await p.query('SELECT * FROM bookings'); for(const r of bookings.rows) this.bookings.set(r.id,{...r,amount:Number(r.amount),created_at:new Date(r.created_at).toISOString()});
+    const outbox=await p.query('SELECT * FROM outbox_events'); for(const r of outbox.rows) this.outboxEvents.set(r.id,{...r,payload:r.payload,created_at:new Date(r.created_at).toISOString(),processed_at:r.processed_at?new Date(r.processed_at).toISOString():null});
+    const audits=await p.query('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500'); this.auditLogs=audits.rows.map(r=>({...r,details:r.details,created_at:new Date(r.created_at).toISOString()}));
+  }
   public async init() {
     if (this.isInitialized) return;
-    this.isInitialized = true;
-    await this.seedInitialData();
+    const connectionString=process.env.DATABASE_URL || 'postgresql://pulse_user:pulse_secure_pass_2026@127.0.0.1:5432/pulsereserve_db';
+    this.pool=new Pool({connectionString,max:20,connectionTimeoutMillis:5000});
+    await this.pg.query('SELECT 1');
+    const schema=await readFile(new URL('./schema.sql', import.meta.url),'utf8');
+    await this.pg.query(schema);
+    const count=await this.pg.query('SELECT COUNT(*)::int AS count FROM users');
+    if(Number(count.rows[0].count)>0) await this.loadPersistentState();
+    else { await this.seedInitialData(); await this.persistSeed(); }
+    this.isInitialized=true;
+    console.log('[PulseReserve] Connected to PostgreSQL; durable state loaded.');
   }
+  public async close(){ if(this.pool) await this.pool.end(); this.pool=null; this.isInitialized=false; }
 
   private async seedInitialData() {
     // 1. Seed Admin User
@@ -236,18 +268,12 @@ class DatabaseEngine {
 
   // --- Users Operations ---
   public async findUserByEmail(email: string): Promise<UserRecord | null> {
-    const normalized = email.trim().toLowerCase();
-    for (const user of this.users.values()) {
-      if (user.email.toLowerCase() === normalized) {
-        return { ...user };
-      }
-    }
-    return null;
+    const normalized=email.trim().toLowerCase(); const result=await this.pg.query('SELECT * FROM users WHERE lower(email)=$1',[normalized]);
+    if(!result.rows[0]) return null; const r=result.rows[0] as UserRecord; this.users.set(r.id,r); return {...r};
   }
 
   public async findUserById(id: string): Promise<UserRecord | null> {
-    const user = this.users.get(id);
-    return user ? { ...user } : null;
+    const result=await this.pg.query('SELECT * FROM users WHERE id=$1',[id]); if(!result.rows[0]) return null; const r=result.rows[0] as UserRecord; this.users.set(r.id,r); return {...r};
   }
 
   public async createUser(userData: Omit<UserRecord, 'created_at' | 'updated_at'>): Promise<UserRecord> {
@@ -265,44 +291,34 @@ class DatabaseEngine {
       updated_at: now
     };
     this.users.set(record.id, record);
+    await this.pg.query(`INSERT INTO users(id,name,email,password_hash,role,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7)`,[record.id,record.name,record.email,record.password_hash,record.role,record.created_at,record.updated_at]);
     return { ...record };
   }
 
   // --- Events Operations ---
   public async getAllEvents(): Promise<EventRecord[]> {
-    return Array.from(this.events.values()).map(e => ({ ...e }));
+    const result=await this.pg.query('SELECT * FROM events ORDER BY created_at'); return result.rows.map((r:any)=>({...r,base_price:Number(r.base_price),starts_at:new Date(r.starts_at).toISOString(),created_at:new Date(r.created_at).toISOString()}));
   }
 
   public async getEventById(id: string): Promise<EventRecord | null> {
-    const event = this.events.get(id);
-    return event ? { ...event } : null;
+    const result=await this.pg.query('SELECT * FROM events WHERE id=$1',[id]); if(!result.rows[0]) return null; const r=result.rows[0]; return {...r,base_price:Number(r.base_price),starts_at:new Date(r.starts_at).toISOString(),created_at:new Date(r.created_at).toISOString()};
   }
 
   // --- Inventory Units Operations ---
   public async getInventoryUnitsByEvent(eventId: string): Promise<InventoryUnitRecord[]> {
-    const list: InventoryUnitRecord[] = [];
-    for (const unit of this.inventoryUnits.values()) {
-      if (unit.event_id === eventId) {
-        list.push({ ...unit });
-      }
-    }
-    // Sort logically by row and seat
-    return list.sort((a, b) => {
-      if (a.row_label === b.row_label) return a.seat_number - b.seat_number;
-      return a.row_label.localeCompare(b.row_label);
-    });
+    const result=await this.pg.query('SELECT * FROM inventory_units WHERE event_id=$1 ORDER BY row_label,seat_number',[eventId]);
+    return result.rows.map((r:any)=>({...r,price:Number(r.price),current_generation:Number(r.current_generation),version:Number(r.version),updated_at:new Date(r.updated_at).toISOString()}));
   }
 
   public async getInventoryUnitById(id: string): Promise<InventoryUnitRecord | null> {
-    const unit = this.inventoryUnits.get(id);
-    return unit ? { ...unit } : null;
+    const result=await this.pg.query('SELECT * FROM inventory_units WHERE id=$1',[id]); if(!result.rows[0]) return null; const r=result.rows[0]; return {...r,price:Number(r.price),current_generation:Number(r.current_generation),version:Number(r.version),updated_at:new Date(r.updated_at).toISOString()};
   }
 
   public async updateInventoryUnit(
     id: string,
     updates: Partial<InventoryUnitRecord>
   ): Promise<InventoryUnitRecord> {
-    const unit = this.inventoryUnits.get(id);
+    const unit = await this.getInventoryUnitById(id);
     if (!unit) {
       throw new Error(`Inventory unit "${id}" not found.`);
     }
@@ -313,6 +329,7 @@ class DatabaseEngine {
       updated_at: new Date().toISOString()
     };
     this.inventoryUnits.set(id, updated);
+    await this.pg.query(`UPDATE inventory_units SET status=$2,current_reservation_id=$3,current_generation=$4,version=$5,updated_at=$6 WHERE id=$1`,[id,updated.status,updated.current_reservation_id,updated.current_generation,updated.version,updated.updated_at]);
     return { ...updated };
   }
 
@@ -325,20 +342,20 @@ class DatabaseEngine {
         }
       }
     }
+    await this.pg.query(`INSERT INTO reservations(id,event_id,unit_id,user_id,hold_token,generation,status,idempotency_key,expires_at,created_at,confirmed_at,cancelled_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,[res.id,res.event_id,res.unit_id,res.user_id,res.hold_token,res.generation,res.status,res.idempotency_key||null,res.expires_at,res.created_at,res.confirmed_at||null,res.cancelled_at||null]);
     this.reservations.set(res.id, { ...res });
     return { ...res };
   }
 
   public async getReservationById(id: string): Promise<ReservationRecord | null> {
-    const res = this.reservations.get(id);
-    return res ? { ...res } : null;
+    const result=await this.pg.query('SELECT * FROM reservations WHERE id=$1',[id]); if(!result.rows[0]) return null; const r=result.rows[0]; return {...r,generation:Number(r.generation),expires_at:new Date(r.expires_at).toISOString(),created_at:new Date(r.created_at).toISOString(),confirmed_at:r.confirmed_at?new Date(r.confirmed_at).toISOString():null,cancelled_at:r.cancelled_at?new Date(r.cancelled_at).toISOString():null};
   }
 
   public async updateReservation(
     id: string,
     updates: Partial<ReservationRecord>
   ): Promise<ReservationRecord> {
-    const res = this.reservations.get(id);
+    const res = await this.getReservationById(id);
     if (!res) {
       throw new Error(`Reservation "${id}" not found.`);
     }
@@ -346,30 +363,46 @@ class DatabaseEngine {
       ...res,
       ...updates
     };
+    await this.pg.query(`UPDATE reservations SET status=$2,confirmed_at=$3,cancelled_at=$4,expires_at=$5,generation=$6 WHERE id=$1`,[id,updated.status,updated.confirmed_at||null,updated.cancelled_at||null,updated.expires_at,updated.generation]);
     this.reservations.set(id, updated);
     return { ...updated };
   }
 
   public async getActiveHolds(): Promise<ReservationRecord[]> {
-    const now = Date.now();
-    const active: ReservationRecord[] = [];
-    for (const res of this.reservations.values()) {
-      if (res.status === 'HELD' && new Date(res.expires_at).getTime() > now) {
-        active.push({ ...res });
-      }
-    }
-    return active;
+    const result=await this.pg.query("SELECT * FROM reservations WHERE status='HELD' AND expires_at>NOW()"); return result.rows.map((r:any)=>({...r,generation:Number(r.generation),expires_at:new Date(r.expires_at).toISOString(),created_at:new Date(r.created_at).toISOString()}));
   }
 
   public async getExpiredUnreleasedHolds(): Promise<ReservationRecord[]> {
-    const now = Date.now();
-    const expired: ReservationRecord[] = [];
-    for (const res of this.reservations.values()) {
-      if (res.status === 'HELD' && new Date(res.expires_at).getTime() <= now) {
-        expired.push({ ...res });
+    const result=await this.pg.query("SELECT * FROM reservations WHERE status='HELD' AND expires_at<=NOW()"); return result.rows.map((r:any)=>({...r,generation:Number(r.generation),expires_at:new Date(r.expires_at).toISOString(),created_at:new Date(r.created_at).toISOString()}));
+  }
+
+  /** Atomically persist the booking, reservation state, inventory projection and outbox event. */
+  public async finalizeBooking(booking: BookingRecord, reservationId: string, unitId: string, generation: number, outboxPayload: any): Promise<BookingRecord> {
+    const client=await this.pg.connect();
+    const now=new Date().toISOString();
+    const outbox: OutboxEventRecord={id:`outbox_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,aggregate_type:'BOOKING',aggregate_id:booking.id,event_type:'BOOKING_CONFIRMED',payload:outboxPayload,status:'PENDING',retry_count:0,last_error:null,created_at:now,processed_at:null};
+    try {
+      await client.query('BEGIN');
+      const existing=await client.query('SELECT * FROM bookings WHERE reservation_id=$1',[reservationId]);
+      if(existing.rows[0]) {
+        await client.query('COMMIT');
+        const r=existing.rows[0];
+        const existingBooking={...r,amount:Number(r.amount),created_at:new Date(r.created_at).toISOString()} as BookingRecord;
+        this.bookings.set(existingBooking.id,existingBooking); return existingBooking;
       }
-    }
-    return expired;
+      await client.query(`INSERT INTO bookings(id,booking_reference,reservation_id,event_id,unit_id,user_id,amount,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[booking.id,booking.booking_reference,booking.reservation_id,booking.event_id,booking.unit_id,booking.user_id,booking.amount,booking.status,booking.created_at]);
+      const resUpdate=await client.query(`UPDATE reservations SET status='CONFIRMED',confirmed_at=$2 WHERE id=$1 AND user_id=$3 AND status IN ('HELD','CONFIRMED')`,[reservationId,now,booking.user_id]);
+      if(resUpdate.rowCount!==1) throw new Error('Reservation is no longer confirmable in PostgreSQL.');
+      await client.query(`UPDATE inventory_units SET status='CONFIRMED',current_generation=$2,version=version+1,updated_at=$3 WHERE id=$1`,[unitId,generation,now]);
+      await client.query(`INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload,status,retry_count,last_error,created_at,processed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[outbox.id,outbox.aggregate_type,outbox.aggregate_id,outbox.event_type,JSON.stringify(outbox.payload),outbox.status,outbox.retry_count,outbox.last_error,outbox.created_at,outbox.processed_at]);
+      await client.query('COMMIT');
+      this.bookings.set(booking.id,{...booking});
+      const res=this.reservations.get(reservationId); if(res) this.reservations.set(reservationId,{...res,status:'CONFIRMED',confirmed_at:now});
+      const unit=this.inventoryUnits.get(unitId); if(unit) this.inventoryUnits.set(unitId,{...unit,status:'CONFIRMED',current_generation:generation,version:unit.version+1,updated_at:now});
+      this.outboxEvents.set(outbox.id,outbox);
+      return {...booking};
+    } catch(error) { await client.query('ROLLBACK').catch(()=>{}); throw error; }
+    finally { client.release(); }
   }
 
   // --- Bookings Operations ---
@@ -382,33 +415,24 @@ class DatabaseEngine {
     }
 
     this.bookings.set(booking.id, { ...booking });
+    await this.pg.query(`INSERT INTO bookings(id,booking_reference,reservation_id,event_id,unit_id,user_id,amount,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[booking.id,booking.booking_reference,booking.reservation_id,booking.event_id,booking.unit_id,booking.user_id,booking.amount,booking.status,booking.created_at]);
     return { ...booking };
   }
 
   public async getBookingsByUser(userId: string): Promise<BookingRecord[]> {
-    const list: BookingRecord[] = [];
-    for (const b of this.bookings.values()) {
-      if (b.user_id === userId) {
-        list.push({ ...b });
-      }
-    }
-    return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const result=await this.pg.query('SELECT * FROM bookings WHERE user_id=$1 ORDER BY created_at DESC',[userId]); return result.rows.map((r:any)=>({...r,amount:Number(r.amount),created_at:new Date(r.created_at).toISOString()}));
   }
 
   public async getAllBookings(): Promise<BookingRecord[]> {
-    return Array.from(this.bookings.values()).map(b => ({ ...b }));
+    const result=await this.pg.query('SELECT * FROM bookings ORDER BY created_at DESC'); return result.rows.map((r:any)=>({...r,amount:Number(r.amount),created_at:new Date(r.created_at).toISOString()}));
   }
 
   public async getBookingById(id: string): Promise<BookingRecord | null> {
-    const b = this.bookings.get(id);
-    return b ? { ...b } : null;
+    const result=await this.pg.query('SELECT * FROM bookings WHERE id=$1',[id]); if(!result.rows[0]) return null; const r=result.rows[0]; return {...r,amount:Number(r.amount),created_at:new Date(r.created_at).toISOString()};
   }
 
   public async getBookingByReservationId(resId: string): Promise<BookingRecord | null> {
-    for (const b of this.bookings.values()) {
-      if (b.reservation_id === resId) return { ...b };
-    }
-    return null;
+    const result=await this.pg.query('SELECT * FROM bookings WHERE reservation_id=$1',[resId]); if(!result.rows[0]) return null; const r=result.rows[0]; return {...r,amount:Number(r.amount),created_at:new Date(r.created_at).toISOString()};
   }
 
   // --- Transactional Outbox Operations ---
@@ -431,18 +455,13 @@ class DatabaseEngine {
       processed_at: null
     };
     this.outboxEvents.set(record.id, record);
+    await this.pg.query(`INSERT INTO outbox_events(id,aggregate_type,aggregate_id,event_type,payload,status,retry_count,last_error,created_at,processed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[record.id,record.aggregate_type,record.aggregate_id,record.event_type,JSON.stringify(record.payload),record.status,record.retry_count,record.last_error,record.created_at,record.processed_at]);
     return { ...record };
   }
 
   public async getPendingOutboxEvents(limit = 20): Promise<OutboxEventRecord[]> {
-    const pending: OutboxEventRecord[] = [];
-    for (const event of this.outboxEvents.values()) {
-      if (event.status === 'PENDING' || (event.status === 'FAILED' && event.retry_count < 5)) {
-        pending.push({ ...event });
-        if (pending.length >= limit) break;
-      }
-    }
-    return pending;
+    const result=await this.pg.query("SELECT * FROM outbox_events WHERE status='PENDING' OR (status='FAILED' AND retry_count<5) ORDER BY created_at LIMIT $1",[limit]);
+    return result.rows.map((r:any)=>({...r,payload:r.payload,created_at:new Date(r.created_at).toISOString(),processed_at:r.processed_at?new Date(r.processed_at).toISOString():null}));
   }
 
   public async updateOutboxEvent(
@@ -453,6 +472,7 @@ class DatabaseEngine {
     if (!event) throw new Error(`Outbox event "${id}" not found.`);
     const updated: OutboxEventRecord = { ...event, ...updates };
     this.outboxEvents.set(id, updated);
+    await this.pg.query(`UPDATE outbox_events SET status=$2,retry_count=$3,last_error=$4,processed_at=$5 WHERE id=$1`,[id,updated.status,updated.retry_count,updated.last_error,updated.processed_at]);
     return { ...updated };
   }
 
@@ -471,6 +491,7 @@ class DatabaseEngine {
   // --- Audit Logs ---
   public logAudit(log: AuditLogRecord): void {
     this.auditLogs.unshift({ ...log });
+    if(this.pool) void this.pool.query(`INSERT INTO audit_logs(id,event_type,entity_id,user_id,details,ip_address,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING`,[log.id,log.event_type,log.entity_id,log.user_id||null,JSON.stringify(log.details??{}),log.ip_address||null,log.created_at]).catch(e=>console.error('[PulseReserve] audit persistence failed',e.message));
     if (this.auditLogs.length > 500) {
       this.auditLogs.pop();
     }

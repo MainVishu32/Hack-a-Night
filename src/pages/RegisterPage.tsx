@@ -57,7 +57,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[#F8FAFC]">Create Account</h1>
           <p className="mt-1 text-xs text-[#A8B3C7]">
-            Register to participate in high-concurrency reservation events.
+            Your tickets and favorite plans, all in one place.
           </p>
         </div>
 
@@ -162,7 +162,7 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onNavigate }) => {
             disabled={loading}
             className="w-full mt-2 py-3 px-4 rounded-lg text-xs font-semibold text-[#0B1220] bg-[#2DD4BF] hover:bg-[#2DD4BF]/90 disabled:opacity-50 transition-colors shadow-sm"
           >
-            {loading ? 'Creating Account...' : 'Complete Registration'}
+            {loading ? 'Creating your account…' : 'Create account'}
           </button>
         </form>
 

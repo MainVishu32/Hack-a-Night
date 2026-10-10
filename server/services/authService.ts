@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { db, UserRecord } from '../db/database.js';
+import { db } from '../db/database.js';
+import type { UserRecord } from '../db/database.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'pulse_reserve_super_secure_distributed_key_2026';
 

@@ -24,8 +24,11 @@ local status = redis.call("HGET", key, "status")
 local currentGen = tonumber(redis.call("HGET", key, "generation") or "0")
 local expiresAt = tonumber(redis.call("HGET", key, "expires_at") or "0")
 
--- Unit is available if not yet tracked, marked AVAILABLE, or hold has strictly expired
-if not status or status == "AVAILABLE" or (status == "HELD" and expiresAt <= nowMs) then
+-- Fail closed: inventory must be initialized from PostgreSQL before claims are accepted.
+if not status then return { 0, "INVENTORY_NOT_INITIALIZED", "0" } end
+
+-- Unit is available if marked AVAILABLE or its previous hold has strictly expired.
+if status == "AVAILABLE" or (status == "HELD" and expiresAt <= nowMs) then
     local nextGen = currentGen + 1
     local newExpiresAt = nowMs + holdDurationMs
 
@@ -37,9 +40,8 @@ if not status or status == "AVAILABLE" or (status == "HELD" and expiresAt <= now
         "expires_at", newExpiresAt,
         "claimed_at", nowMs
     )
-    -- Set Redis TTL slightly higher than hold duration (safety buffer)
-    local ttlSeconds = math.ceil((holdDurationMs + 5000) / 1000)
-    redis.call("EXPIRE", key, ttlSeconds)
+    -- Keep the inventory hash persistent so generation fencing survives hold expiry.
+    -- expires_at is enforced atomically by every claim/confirm/reconcile script.
 
     return { 1, tostring(nextGen), tostring(newExpiresAt) }
 else

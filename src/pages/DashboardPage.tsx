@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   Activity,
   Layers,
@@ -14,7 +14,7 @@ import {
   Cpu
 } from 'lucide-react';
 import { api } from '../services/api.ts';
-import { AdminMetrics } from '../types/index.ts';
+import type { AdminMetrics } from '../types/index.ts';
 
 interface DashboardPageProps {
   onNavigate: (page: string) => void;
@@ -326,7 +326,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onNavigate }) => {
             </p>
             <div className="pt-2 border-t border-[#293548] flex items-center justify-between text-[11px] font-mono text-[#A8B3C7]">
               <span>Status</span>
-              <span className="text-[#10B981]">ONLINE · STRICT ACID</span>
+              <span className="text-[#10B981]">ONLINE Â· STRICT ACID</span>
             </div>
           </div>
 

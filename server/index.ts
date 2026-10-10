@@ -22,15 +22,19 @@ export async function initializeBackend() {
 
   console.log('[PulseReserve] Initializing Database & Redis coordination engine...');
   await db.init();
+  await redisEngine.connect();
 
   const events = await db.getAllEvents();
-  if (events.length > 0) {
-    const units = await db.getInventoryUnitsByEvent(events[0].id);
+  for (const event of events) {
+    const units = await db.getInventoryUnitsByEvent(event.id);
     await redisEngine.syncWithDatabase(units);
   }
 
   // Start durable background worker and self-healing reconciler
   worker.start();
+  const shutdown = async () => { try { worker.stop?.(); } catch {} try { await redisEngine.close(); } catch {} try { await db.close(); } catch {} };
+  process.once('SIGINT', () => { void shutdown().finally(() => process.exit(0)); });
+  process.once('SIGTERM', () => { void shutdown().finally(() => process.exit(0)); });
   console.log('[PulseReserve] Engine online: Database initialized, Redis synchronized, worker active.');
 }
 

@@ -31,7 +31,7 @@ function MainApp() {
   };
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-[#0B1220] text-[#A8B3C7]">Loading PulseReserve…</div>;
+    return <div className="min-h-screen flex items-center justify-center bg-[#0B1220] text-[#A8B3C7]">Getting Spotly ready…</div>;
   }
 
   return (
@@ -41,7 +41,7 @@ function MainApp() {
         {currentPage === 'landing' && <LandingPage onNavigate={handleNavigate} />}
         {currentPage === 'login' && <LoginPage onNavigate={handleNavigate} />}
         {currentPage === 'register' && <RegisterPage onNavigate={handleNavigate} />}
-        {currentPage === 'events' && <EventsPage onNavigate={handleNavigate} />}
+        {currentPage === 'events' && <EventsPage onNavigate={handleNavigate} initialQuery={navParams.query} initialCategory={navParams.category} />}
         {currentPage === 'dashboard' && <AdminObservabilityPage onNavigate={handleNavigate} />}
         {currentPage === 'admin' && <AdminObservabilityPage onNavigate={handleNavigate} />}
         {currentPage === 'seats' && <SeatSelectionPage eventId={navParams.eventId} onNavigate={handleNavigate} />}
