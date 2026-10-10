@@ -1,69 +1,103 @@
-# PulseReserve — consolidated demo project
+Spotly
+Find it. Lock it. Love it.
+Spotly is a smart reservation and booking platform built to deliver a seamless booking experience while managing high demand for limited seats. It combines temporary seat holds, concurrency control, secure role-based access, and real-time reservation monitoring in a unified platform.
 
-PulseReserve is a high-contention reservation demo with separate attendee and administrator experiences.
+✨ Features
+Intuitive Booking Experience — Browse event listings and preview available seats.
+User Authentication — Separate experiences for attendees and administrators.
+Seat Selection & Temporary Holds — Temporarily hold a seat before confirming a booking.
+Demo Checkout & Booking History — Confirm demo bookings and view personal reservations.
+Admin Dashboard — Monitor inventory, bookings, reports, and system activity.
+Concurrency Control — Prevent multiple users from holding the same seat simultaneously.
+Audit & Reconciliation — Inspect reservation activity and inventory consistency.
+Simulation & Forecasting — Explore reservation behavior through administrative controls.
+Load Testing — Includes a k6 scenario for testing concurrent booking requests.
+Role-Based Authorization — Protect administrative routes and authenticated booking endpoints.
+🛠️ Tech Stack
+Technology	Purpose
+React & TypeScript	Frontend interface
+Vite	Development server and frontend build
+Node.js & Express	Backend API
+In-memory adapters	Demo data and reservation coordination
+PostgreSQL	Database schema reference
+Redis Lua	Reservation coordination examples
+k6	Concurrent load testing
+🚀 Getting Started
+Prerequisites
+Node.js 20 or later (Node.js 22 LTS recommended)
+npm 10 or later
+Installation
+1. Clone the repository
 
-## What's included
+git clone <your-repository-url>
+cd <your-project-folder>
+Alternatively, download and extract the project ZIP.
 
-- Brand-first booking homepage with event-style cards and seat preview.
-- Attendee flow: account creation/sign-in, active event listing, seat selection, temporary hold, demo checkout, and personal booking history.
-- Admin flow: separate operations console, inventory/booking reports, simulation controls, audit and reconciliation views.
-- Server-side role checks for admin routes and authenticated booking endpoints.
-- Demo event and inventory data, plus a k6 concurrency test scenario.
-- Express SPA fallback compatible with the installed modern router syntax.
+2. Install dependencies
 
-## Important demo-data note
+Run the following command in the project directory containing package.json:
 
-The backend currently seeds one event with real seat inventory: **Global Tech Summit 2026 Keynote**. The other cards on the landing page are visual sample listings and route to the active event list; they do not have their own inventory. Do not claim those sample cards are independently bookable until event-specific inventory is added.
+npm install
+3. Start the development servers
 
-The current database and Redis coordination adapters are in-memory demo implementations. The repository includes PostgreSQL schema and Redis Lua examples, but these are not proof of a live PostgreSQL database or Redis service. Demo data resets when the server restarts. Do not describe the project as durable production infrastructure until persistent adapters are implemented and verified.
+npm run dev
+4. Open Spotly
 
-## Requirements
+Visit the Vite URL displayed in your terminal, usually:
 
-- Node.js 20+ (Node 22 LTS recommended)
-- npm 10+
+http://127.0.0.1:5173
 
-## Run on Windows
+The API server runs on port 3000.
 
-1. Extract the ZIP into a writable folder.
-2. Open PowerShell in the folder containing `package.json`.
-3. Run:
+Keep the terminal open while using the application. Press Ctrl+C to stop the development servers.
 
-   ```powershell
-   npm install
-   npm run dev
-   ```
+Production Build
+Build the frontend:
 
-4. Open the Vite URL printed in the terminal (usually `http://127.0.0.1:5173`). The API server listens on port `3000`.
-5. Keep the terminal open. Press `Ctrl+C` to stop both processes.
+npm run build
+To run the server after building:
 
-Build the frontend with `npm run build`. Run `npm start` only after building if you want the server to serve the `dist` bundle.
+npm start
+🔑 Demo Accounts
+Use these credentials to explore the attendee and administrator experiences.
 
-## Demo accounts
+Role	Email	Password
+Attendee	alex@example.com	DemoUser2026!
+Admin	admin@pulsereserve.io	PulseAdmin2026!
+These credentials are for local demonstrations only. Replace or rotate demo credentials and secure all secrets before any public deployment.
 
-| Role | Email | Password |
-|---|---|---|
-| Attendee | `alex@example.com` | `DemoUser2026!` |
-| Admin | `admin@pulsereserve.io` | `PulseAdmin2026!` |
+🧪 Key Scenarios to Test
+Sign in as an attendee and verify access to event browsing and personal bookings.
+Sign in as an administrator and verify access to the operations dashboard and reports.
+Place a temporary seat hold and confirm a demo booking.
+Attempt simultaneous holds on the same seat and verify that only one request acquires the active hold.
+Check that the administrator dashboard reflects the reservation state.
+Test administrative API authorization independently of frontend navigation.
+Restart the server and verify the documented in-memory data reset.
+📁 Project Structure
+src/
+├── pages/                  # Homepage, attendee and admin screens
+├── context/
+│   └── AuthContext.tsx     # Authentication state
+└── services/
+    └── api.ts              # Frontend API client
 
-These are local demo credentials only. Remove or rotate them before any public deployment. Do not use real passwords.
+server/
+├── api/
+│   └── router.ts           # API routes and authorization
+├── services/               # Reservation, scheduler, worker and forecasting
+├── db/
+│   └── schema.sql          # PostgreSQL schema reference
+└── redis/
+    └── luaScripts.ts       # Redis Lua examples
 
-## Recommended acceptance tests
+loadtests/                  # k6 concurrency scenarios
+⚠️ Demo Limitations
+Single bookable event: Only Global Tech Summit 2026 Keynote has seeded seat inventory. Other homepage cards are visual samples and do not have independent bookable inventory.
+In-memory storage: The current database and Redis coordination adapters are demo implementations. Data resets when the server restarts.
+Reference implementations: The PostgreSQL schema and Redis Lua scripts are included as references; they do not indicate that live PostgreSQL or Redis services are connected.
+Production readiness: Persistent storage, production-grade coordination, and deployment security must be implemented and verified before production use.
+🎯 Project Goal
+Spotly aims to make high-demand reservations smoother and more reliable by coordinating temporary holds, preventing conflicting seat claims, enforcing role-based access, and providing visibility into booking activity.
 
-1. Sign in as attendee; verify Browse Shows and My Bookings appear, and admin metrics do not.
-2. Sign out; sign in as admin; verify the operations console and reports appear, and attendee checkout is blocked.
-3. Place a hold, confirm a demo booking, and verify the booking appears in that attendee's history.
-4. Attempt two holds for the same unit and confirm only one can own the active hold.
-5. Verify the admin dashboard reflects the same inventory state.
-6. Restart the server and observe the documented in-memory reset behavior.
-7. Test admin API authorization directly; hiding admin navigation alone is not sufficient.
-
-## Layout
-
-- `src/pages/` — homepage, attendee screens, admin observability
-- `src/context/AuthContext.tsx` — authentication state
-- `src/services/api.ts` — frontend API client
-- `server/api/router.ts` — API routes and authorization
-- `server/services/` — reservation, scheduler, worker, and forecasting logic
-- `server/db/schema.sql` — PostgreSQL schema reference
-- `server/redis/luaScripts.ts` — Redis Lua examples
-- `loadtests/` — k6 contention scenario
+Spotly — Find it. Lock it. Love it.
